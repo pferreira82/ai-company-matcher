@@ -1,4 +1,5 @@
 import axios from 'axios';
+import apiLogger from './apiLogger';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -11,7 +12,7 @@ const api = axios.create({
     }
 });
 
-// Request interceptor
+// Request interceptor with logging
 api.interceptors.request.use(
     (config) => {
         // Add auth token if available
@@ -19,22 +20,55 @@ api.interceptors.request.use(
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+
+        // Add timestamp for duration calculation
+        config.metadata = { startTime: Date.now() };
+
+        // Log the request
+        apiLogger.logRequest(config);
+
         return config;
     },
     (error) => {
+        apiLogger.logError(error);
         return Promise.reject(error);
     }
 );
 
-// Response interceptor
+// Response interceptor with logging
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        // Calculate request duration
+        const duration = response.config.metadata
+            ? Date.now() - response.config.metadata.startTime
+            : null;
+
+        // Log the response
+        apiLogger.logResponse(response, duration);
+
+        if (response.status === 401) {
+            // Handle unauthorized access
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        }
+
+        return response;
+    },
     (error) => {
+        // Calculate request duration for failed requests
+        const duration = error.config?.metadata
+            ? Date.now() - error.config.metadata.startTime
+            : null;
+
+        // Log the error
+        apiLogger.logError(error);
+
         if (error.response?.status === 401) {
             // Handle unauthorized access
             localStorage.removeItem('token');
             window.location.href = '/login';
         }
+
         return Promise.reject(error);
     }
 );
@@ -78,5 +112,16 @@ export const configAPI = {
     updateSettings: (settings) => api.put('/config/settings', settings)
 };
 
-// Export default api instance
+// Debug API (for accessing logger)
+export const debugAPI = {
+    getLogs: () => apiLogger.getLogs(),
+    clearLogs: () => apiLogger.clearLogs(),
+    exportLogs: () => apiLogger.exportLogs(),
+    getStats: () => apiLogger.getStats(),
+    toggleLogging: () => apiLogger.toggle(),
+    isLoggingEnabled: () => apiLogger.isEnabled()
+};
+
+// Export default api instance and logger
 export default api;
+export { apiLogger };

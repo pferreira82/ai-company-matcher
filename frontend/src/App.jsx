@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { User, Search, Database, Mail, Settings, Brain, Heart, MapPin, Zap, AlertCircle, CheckCircle } from 'lucide-react';
+import { User, Search, Database, Mail, Settings, Brain, Heart, MapPin, Bug, BarChart3 } from 'lucide-react';
 
 // Components
+import ProfileTab from './components/ProfileTab';
 import CompanyCard from './components/CompanyCard';
 import EmailModal from './components/EmailModal';
+import RealTimeStatsDashboard from './components/RealTimeStatsDashboard';
 
 // Hooks
 import { useProfile } from './hooks/useProfile';
@@ -11,7 +13,7 @@ import { useSearch } from './hooks/useSearch';
 import { useAPI } from './hooks/useAPI';
 
 // Services
-import { companiesAPI, emailAPI, configAPI } from './services/api';
+import { companiesAPI, emailAPI, configAPI, debugAPI } from './services/api';
 
 const App = () => {
     const [activeTab, setActiveTab] = useState('profile');
@@ -19,18 +21,15 @@ const App = () => {
     const [emailModal, setEmailModal] = useState({ isOpen: false, company: null, template: null });
     const [apiKeys, setApiKeys] = useState({
         openai: '',
-        apollo: '',    // Updated: Apollo instead of Clearbit
+        apollo: '',
         hunter: '',
         linkedin: '',
         crunchbase: ''
     });
-    const [apiStatus, setApiStatus] = useState({
-        openai: 'disconnected',
-        apollo: 'disconnected',    // Updated: Apollo instead of Clearbit
-        hunter: 'disconnected',
-        linkedin: 'disconnected',
-        crunchbase: 'disconnected'
-    });
+
+    // API Logging state
+    const [apiLoggingEnabled, setApiLoggingEnabled] = useState(() => debugAPI.isLoggingEnabled());
+    const [apiStats, setApiStats] = useState(null);
 
     // Custom hooks
     const { profile, loading: profileLoading, updateProfile, updatePreferences, saveProfile } = useProfile();
@@ -46,36 +45,76 @@ const App = () => {
 
     useEffect(() => {
         loadCompanies();
+        updateApiStats();
     }, []);
+
+    // Update API stats periodically when logging is enabled
+    useEffect(() => {
+        if (apiLoggingEnabled) {
+            const interval = setInterval(updateApiStats, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [apiLoggingEnabled]);
+
+    const updateApiStats = () => {
+        if (debugAPI.isLoggingEnabled()) {
+            setApiStats(debugAPI.getStats());
+        }
+    };
+
+    const toggleApiLogging = () => {
+        const newState = debugAPI.toggleLogging();
+        setApiLoggingEnabled(newState);
+        updateApiStats();
+    };
+
+    const clearApiLogs = () => {
+        if (confirm('Are you sure you want to clear all API logs?')) {
+            debugAPI.clearLogs();
+            updateApiStats();
+        }
+    };
+
+    const exportApiLogs = () => {
+        debugAPI.exportLogs();
+    };
 
     const loadCompanies = async () => {
         const result = await execute(() => companiesAPI.getMatches());
         if (result.success) {
-            setCompanies(result.data.data);
+            setCompanies(result.data.data || []);
         }
     };
 
     const handleStartSearch = async () => {
+        // Validate required fields
         if (!profile.resume || !profile.personalStatement) {
-            alert('Please complete your profile first');
+            alert('Please complete your resume and personal statement first');
             return;
         }
 
-        if (!apiKeys.openai) {
-            alert('OpenAI API key is required for AI analysis');
-            setActiveTab('config');
+        if (!profile.personalInfo?.firstName || !profile.personalInfo?.email) {
+            alert('Please add your name and email in the personal information section');
+            setActiveTab('profile');
             return;
         }
 
-        if (!apiKeys.apollo) {
-            alert('Apollo.io API key is required for company data');
-            setActiveTab('config');
+        // Validate preferences
+        if (!profile.preferences?.companySizes || profile.preferences.companySizes.length === 0) {
+            alert('Please select at least one company size preference');
+            setActiveTab('profile');
+            return;
+        }
+
+        if (!profile.preferences?.industries || profile.preferences.industries.length === 0) {
+            alert('Please select at least one industry preference');
+            setActiveTab('profile');
             return;
         }
 
         const result = await startSearch({
             profile,
-            location: 'boston-providence',
+            location: 'boston-providence', // Always start with Boston/Providence
             maxResults: 50
         });
 
@@ -85,6 +124,13 @@ const App = () => {
     };
 
     const handleGenerateEmail = async (company) => {
+        // Check if personal info is complete
+        if (!profile.personalInfo?.firstName || !profile.personalInfo?.email) {
+            alert('Please complete your personal information (name and email) before generating emails');
+            setActiveTab('profile');
+            return;
+        }
+
         const result = await execute(() => emailAPI.generate(company.id, profile));
         if (result.success) {
             setEmailModal({
@@ -104,23 +150,6 @@ const App = () => {
         }
     };
 
-    const handleTestAPI = async (apiName) => {
-        const apiKey = apiKeys[apiName];
-        if (!apiKey) {
-            alert(`Please enter ${apiName} API key first`);
-            return;
-        }
-
-        const result = await execute(() => configAPI.testConnection(apiName, apiKey));
-        if (result.success) {
-            setApiStatus(prev => ({ ...prev, [apiName]: 'connected' }));
-            alert(`${apiName} API connected successfully!`);
-        } else {
-            setApiStatus(prev => ({ ...prev, [apiName]: 'error' }));
-            alert(`${apiName} API connection failed: ${result.error}`);
-        }
-    };
-
     const handleSaveApiKeys = async () => {
         const result = await execute(() => configAPI.saveApiKeys(apiKeys));
         if (result.success) {
@@ -129,6 +158,17 @@ const App = () => {
     };
 
     const handleSaveProfile = async () => {
+        // Validate required fields
+        if (!profile.personalInfo?.firstName || !profile.personalInfo?.email) {
+            alert('Please provide your name and email address');
+            return;
+        }
+
+        if (!profile.resume || !profile.personalStatement) {
+            alert('Please complete your resume and personal statement');
+            return;
+        }
+
         const result = await saveProfile(profile);
         if (result.success) {
             alert('Profile saved successfully!');
@@ -151,30 +191,16 @@ const App = () => {
                     />
                 </div>
 
-                {searchStatus.isRunning && (
-                    <div className="bg-blue-50 p-4 rounded-lg">
-                        <h4 className="font-medium text-blue-800 mb-2">AI Analysis In Progress:</h4>
-                        <div className="text-sm text-blue-700 space-y-1">
-                            <p>• <Zap className="w-4 h-4 inline mr-1" />ChatGPT analyzing your profile for cultural fit</p>
-                            <p>• <Database className="w-4 h-4 inline mr-1" />Apollo.io searching Boston/Providence companies</p>
-                            <p>• <Heart className="w-4 h-4 inline mr-1" />AI evaluating work-life balance reputations</p>
-                            <p>• <Mail className="w-4 h-4 inline mr-1" />Finding verified HR contacts</p>
-                        </div>
-                    </div>
-                )}
-
                 {searchStatus.completed && (
                     <div className="bg-green-50 p-4 rounded-lg">
                         <h4 className="font-medium text-green-800 mb-2">Search Completed!</h4>
                         <p className="text-sm text-green-700">
-                            Found {searchStatus.totalFound} companies with verified HR contacts
+                            Found {searchStatus.totalFound} companies with verified HR contacts for {profile.personalInfo?.firstName || 'you'}
                         </p>
-                        {searchStatus.apiUsage && (
-                            <div className="mt-2 text-xs text-green-600">
-                                Apollo: {searchStatus.apiUsage.apollo?.companiesFound || 0} companies •
-                                Hunter: {searchStatus.apiUsage.hunter?.emailsFound || 0} emails •
-                                OpenAI: {searchStatus.apiUsage.openai?.calls || 0} calls
-                            </div>
+                        {searchStatus.expandedNationwide && (
+                            <p className="text-sm text-green-600 mt-1">
+                                Expanded to nationwide search to find more matches.
+                            </p>
                         )}
                     </div>
                 )}
@@ -182,61 +208,128 @@ const App = () => {
         );
     };
 
-    const ApiStatusIndicator = ({ status }) => {
-        const getStatusColor = () => {
-            switch(status) {
-                case 'connected': return 'text-green-600';
-                case 'error': return 'text-red-600';
-                default: return 'text-gray-400';
-            }
-        };
+    const getProfileCompleteness = () => {
+        let completed = 0;
+        let total = 8;
 
-        const getStatusIcon = () => {
-            switch(status) {
-                case 'connected': return <CheckCircle className="w-4 h-4" />;
-                case 'error': return <AlertCircle className="w-4 h-4" />;
-                default: return <div className="w-4 h-4 border-2 border-gray-400 rounded-full" />;
-            }
-        };
+        if (profile.personalInfo?.firstName && profile.personalInfo?.lastName) completed++;
+        if (profile.personalInfo?.email) completed++;
+        if (profile.resume) completed++;
+        if (profile.personalStatement) completed++;
+        if (profile.currentTitle) completed++;
+        if (profile.personalInfo?.location?.city) completed++;
+        if (profile.preferences?.companySizes?.length > 0) completed++;
+        if (profile.preferences?.industries?.length > 0) completed++;
 
-        return (
-            <div className={`flex items-center gap-2 ${getStatusColor()}`}>
-                {getStatusIcon()}
-                <span className="capitalize">{status}</span>
-            </div>
-        );
+        return { completed, total, percentage: Math.round((completed / total) * 100) };
     };
+
+    const profileStats = getProfileCompleteness();
 
     return (
         <div className="min-h-screen bg-gradient-primary">
             <div className="container mx-auto px-4 py-6 max-w-7xl">
                 {/* Header */}
                 <div className="card p-6 mb-6">
-                    <div className="flex items-center gap-3 mb-4">
-                        <Brain className="w-8 h-8 text-blue-600" />
-                        <h1 className="text-3xl font-bold text-gradient">
-                            AI Company Matcher
-                        </h1>
-                        <div className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
-                            Apollo.io Powered
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <Brain className="w-8 h-8 text-blue-600" />
+                            <div>
+                                <h1 className="text-3xl font-bold text-gradient">
+                                    AI Company Matcher
+                                </h1>
+                                {profile.personalInfo?.firstName && (
+                                    <p className="text-gray-600">
+                                        Welcome back, {profile.personalInfo.firstName}!
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Right side controls */}
+                        <div className="flex items-center gap-4">
+                            {/* API Logging Toggle */}
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={toggleApiLogging}
+                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                        apiLoggingEnabled
+                                            ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                                    title="Toggle API call logging in browser console"
+                                >
+                                    <Bug className="w-4 h-4" />
+                                    API Logs {apiLoggingEnabled ? 'ON' : 'OFF'}
+                                </button>
+
+                                {apiLoggingEnabled && apiStats && (
+                                    <div className="flex items-center gap-2 text-xs text-gray-600">
+                                        <BarChart3 className="w-4 h-4" />
+                                        <span>{apiStats.total} calls</span>
+                                        {apiStats.errors > 0 && (
+                                            <span className="text-red-600">({apiStats.errors} errors)</span>
+                                        )}
+                                    </div>
+                                )}
+
+                                {apiLoggingEnabled && (
+                                    <div className="flex gap-1">
+                                        <button
+                                            onClick={clearApiLogs}
+                                            className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+                                            title="Clear API logs"
+                                        >
+                                            Clear
+                                        </button>
+                                        <button
+                                            onClick={exportApiLogs}
+                                            className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+                                            title="Export API logs"
+                                        >
+                                            Export
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Profile Completeness */}
+                            <div className="text-right">
+                                <div className="text-sm text-gray-600 mb-1">Profile Completeness</div>
+                                <div className="flex items-center gap-2">
+                                    <div className="w-24 bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                            style={{ width: `${profileStats.percentage}%` }}
+                                        />
+                                    </div>
+                                    <span className="text-sm font-medium text-gray-700">
+                    {profileStats.percentage}%
+                  </span>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <p className="text-gray-600">
-                        Find companies that match your profile and prioritize work-life balance in Boston/Providence area
+                    <p className="text-gray-600 mt-2">
+                        Find companies that match your profile in Boston, MA → Providence, RI → Nationwide
                     </p>
-                </div>
 
-                {/* API Status Dashboard */}
-                <div className="card p-4 mb-6">
-                    <h3 className="text-sm font-medium text-gray-700 mb-3">API Status</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                        {Object.entries(apiStatus).map(([api, status]) => (
-                            <div key={api} className="flex items-center justify-between">
-                                <span className="text-sm font-medium capitalize">{api === 'apollo' ? 'Apollo.io' : api}</span>
-                                <ApiStatusIndicator status={status} />
+                    {/* API Logging Status Details */}
+                    {apiLoggingEnabled && (
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <div className="flex items-center gap-2 text-blue-800 text-sm">
+                                <Bug className="w-4 h-4" />
+                                <span className="font-medium">API Logging Active</span>
+                                <span>- Check your browser console for detailed API call logs</span>
                             </div>
-                        ))}
-                    </div>
+                            {apiStats && (
+                                <div className="mt-2 text-xs text-blue-700">
+                                    Total: {apiStats.total} | Requests: {apiStats.requests} | Responses: {apiStats.responses} |
+                                    Errors: {apiStats.errors} | Success Rate: {(100 - parseFloat(apiStats.errorRate)).toFixed(1)}%
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Navigation */}
@@ -262,6 +355,9 @@ const App = () => {
                                 >
                                     <Icon className="w-5 h-5" />
                                     {tab.label}
+                                    {tab.id === 'profile' && profileStats.percentage < 100 && (
+                                        <div className="w-2 h-2 bg-orange-400 rounded-full" />
+                                    )}
                                 </button>
                             );
                         })}
@@ -270,130 +366,13 @@ const App = () => {
                     <div className="p-6">
                         {/* Profile Tab */}
                         {activeTab === 'profile' && (
-                            <div className="space-y-6">
-                                <h2 className="text-2xl font-bold text-gray-800">Your Professional Profile</h2>
-
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    <div className="space-y-6">
-                                        <div className="bg-gray-50 p-6 rounded-lg">
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Resume Content *
-                                            </label>
-                                            <textarea
-                                                value={profile.resume}
-                                                onChange={(e) => updateProfile({ resume: e.target.value })}
-                                                className="textarea h-40"
-                                                placeholder="Paste your resume content here..."
-                                                required
-                                            />
-                                        </div>
-
-                                        <div className="bg-gray-50 p-6 rounded-lg">
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Personal Statement *
-                                            </label>
-                                            <textarea
-                                                value={profile.personalStatement}
-                                                onChange={(e) => updateProfile({ personalStatement: e.target.value })}
-                                                className="textarea h-32"
-                                                placeholder="What are you looking for in your next role?"
-                                                required
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-6">
-                                        <div className="bg-gray-50 p-6 rounded-lg">
-                                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Work Preferences</h3>
-                                            <div className="space-y-4">
-                                                <label className="flex items-center gap-3">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={profile.preferences.workLifeBalance}
-                                                        onChange={(e) => updatePreferences({ workLifeBalance: e.target.checked })}
-                                                        className="w-4 h-4 text-blue-600 rounded"
-                                                    />
-                                                    <Heart className="w-4 h-4 text-red-500" />
-                                                    <span>Work-Life Balance Priority</span>
-                                                </label>
-
-                                                <label className="flex items-center gap-3">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={profile.preferences.remoteFriendly}
-                                                        onChange={(e) => updatePreferences({ remoteFriendly: e.target.checked })}
-                                                        className="w-4 h-4 text-blue-600 rounded"
-                                                    />
-                                                    <MapPin className="w-4 h-4 text-blue-500" />
-                                                    <span>Remote-Friendly</span>
-                                                </label>
-
-                                                <div className="grid grid-cols-1 gap-4">
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                            Company Size
-                                                        </label>
-                                                        <select
-                                                            value={profile.preferences.companySize}
-                                                            onChange={(e) => updatePreferences({ companySize: e.target.value })}
-                                                            className="select"
-                                                        >
-                                                            <option value="startup">Startup (1-50)</option>
-                                                            <option value="small">Small (51-200)</option>
-                                                            <option value="medium">Medium (201-1000)</option>
-                                                            <option value="large">Large (1000+)</option>
-                                                        </select>
-                                                    </div>
-
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                            Industry
-                                                        </label>
-                                                        <select
-                                                            value={profile.preferences.industry}
-                                                            onChange={(e) => updatePreferences({ industry: e.target.value })}
-                                                            className="select"
-                                                        >
-                                                            <option value="technology">Technology</option>
-                                                            <option value="fintech">FinTech</option>
-                                                            <option value="healthcare">HealthTech</option>
-                                                            <option value="ecommerce">E-commerce</option>
-                                                            <option value="biotech">BioTech</option>
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {profile.aiAnalysis && (
-                                            <div className="bg-blue-50 p-6 rounded-lg">
-                                                <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center gap-2">
-                                                    <Brain className="w-5 h-5" />
-                                                    AI Analysis
-                                                </h3>
-                                                <div className="space-y-3 text-sm">
-                                                    <div>
-                                                        <h4 className="font-medium text-blue-700">Strengths:</h4>
-                                                        <p className="text-blue-600">{profile.aiAnalysis.strengths?.join(', ')}</p>
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="font-medium text-blue-700">Career Goals:</h4>
-                                                        <p className="text-blue-600">{profile.aiAnalysis.careerGoals?.join(', ')}</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <button
-                                    onClick={handleSaveProfile}
-                                    disabled={profileLoading}
-                                    className="btn btn-primary"
-                                >
-                                    {profileLoading ? 'Saving...' : 'Save Profile'}
-                                </button>
-                            </div>
+                            <ProfileTab
+                                profile={profile}
+                                updateProfile={updateProfile}
+                                updatePreferences={updatePreferences}
+                                handleSaveProfile={handleSaveProfile}
+                                profileLoading={profileLoading}
+                            />
                         )}
 
                         {/* Search Tab */}
@@ -404,26 +383,45 @@ const App = () => {
                                 <div className="bg-blue-50 p-6 rounded-lg">
                                     <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center gap-2">
                                         <Brain className="w-5 h-5" />
-                                        Apollo.io Integration
+                                        Smart Location Strategy for {profile.personalInfo?.firstName || 'You'}
                                     </h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-700">
                                         <ul className="space-y-2">
-                                            <li>• AI analyzes your resume and personal statement</li>
-                                            <li>• Apollo.io searches Boston/Providence companies</li>
-                                            <li>• Finds verified HR contacts automatically</li>
+                                            <li>• <strong>Phase 1:</strong> Boston, MA area companies (primary focus)</li>
+                                            <li>• <strong>Phase 2:</strong> Providence, RI area companies</li>
+                                            <li>• <strong>Phase 3:</strong> Expand nationwide if &lt;100 found</li>
                                         </ul>
                                         <ul className="space-y-2">
+                                            <li>• Filter by your selected company sizes</li>
+                                            <li>• Filter by your selected industries</li>
                                             <li>• AI evaluates work-life balance reputation</li>
-                                            <li>• Hunter.io verifies email addresses</li>
-                                            <li>• Generates personalized email templates</li>
+                                            <li>• Find verified HR contacts for each company</li>
                                         </ul>
                                     </div>
                                 </div>
 
+                                {!profile.personalInfo?.firstName && (
+                                    <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
+                                        <div className="flex items-center gap-2 text-orange-800 mb-2">
+                                            <User className="w-5 h-5" />
+                                            <span className="font-medium">Complete Your Profile First</span>
+                                        </div>
+                                        <p className="text-orange-700 text-sm">
+                                            Please add your personal information (name, email) and preferences before starting a search.
+                                        </p>
+                                        <button
+                                            onClick={() => setActiveTab('profile')}
+                                            className="mt-3 btn btn-primary text-sm"
+                                        >
+                                            Complete Profile
+                                        </button>
+                                    </div>
+                                )}
+
                                 <div className="flex gap-4">
                                     <button
                                         onClick={handleStartSearch}
-                                        disabled={searchStatus.isRunning || !profile.resume || apiLoading}
+                                        disabled={searchStatus.isRunning || !profile.resume || !profile.personalInfo?.firstName || apiLoading}
                                         className="btn btn-success flex items-center gap-2"
                                     >
                                         <Brain className="w-5 h-5" />
@@ -440,7 +438,18 @@ const App = () => {
                                     )}
                                 </div>
 
+                                {/* Basic Progress Bar */}
                                 {renderProgressBar()}
+
+                                {/* Real-Time Stats Dashboard */}
+                                {(searchStatus.isRunning || searchStatus.liveStats) && (
+                                    <div className="mt-8">
+                                        <RealTimeStatsDashboard
+                                            searchStatus={searchStatus}
+                                            isRunning={searchStatus.isRunning}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -448,7 +457,9 @@ const App = () => {
                         {activeTab === 'matches' && (
                             <div className="space-y-6">
                                 <div className="flex justify-between items-center">
-                                    <h2 className="text-2xl font-bold text-gray-800">Company Matches</h2>
+                                    <h2 className="text-2xl font-bold text-gray-800">
+                                        Company Matches {profile.personalInfo?.firstName && `for ${profile.personalInfo.firstName}`}
+                                    </h2>
                                     <div className="text-sm text-gray-600">
                                         {companies.length} companies found • AI-ranked by fit
                                     </div>
@@ -474,6 +485,7 @@ const App = () => {
                                                 company={company}
                                                 onGenerateEmail={handleGenerateEmail}
                                                 onUpdateStatus={handleUpdateCompanyStatus}
+                                                userProfile={profile}
                                             />
                                         ))}
                                     </div>
@@ -490,12 +502,13 @@ const App = () => {
                                     <h3 className="text-lg font-semibold text-yellow-800 mb-4">AI Email Personalization</h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                                         <div>
-                                            <h4 className="font-medium text-yellow-700 mb-2">What AI Analyzes:</h4>
+                                            <h4 className="font-medium text-yellow-700 mb-2">Your Information Used:</h4>
                                             <ul className="text-yellow-600 space-y-1">
-                                                <li>• Your technical background and experience</li>
-                                                <li>• Company's work-life balance culture</li>
-                                                <li>• Relevant skills matching their needs</li>
-                                                <li>• HR contact's name and title from Apollo.io</li>
+                                                <li>• Full name: {profile.personalInfo?.firstName || 'Not set'} {profile.personalInfo?.lastName || ''}</li>
+                                                <li>• Email: {profile.personalInfo?.email || 'Not set'}</li>
+                                                <li>• Current title: {profile.currentTitle || 'Not set'}</li>
+                                                <li>• Location: {profile.personalInfo?.location?.city || 'Not set'}</li>
+                                                <li>• LinkedIn profile: {profile.personalInfo?.linkedinUrl ? 'Added' : 'Not set'}</li>
                                             </ul>
                                         </div>
                                         <div>
@@ -505,9 +518,18 @@ const App = () => {
                                                 <li>• Professional but warm tone</li>
                                                 <li>• Show genuine interest in company</li>
                                                 <li>• Highlight relevant experience</li>
+                                                <li>• Include professional signature</li>
                                             </ul>
                                         </div>
                                     </div>
+
+                                    {(!profile.personalInfo?.firstName || !profile.personalInfo?.email) && (
+                                        <div className="mt-4 p-3 bg-orange-100 border border-orange-300 rounded">
+                                            <p className="text-orange-800 text-sm">
+                                                <strong>Note:</strong> Please complete your personal information to generate fully personalized emails.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="bg-gray-50 p-6 rounded-lg">
@@ -524,7 +546,7 @@ const App = () => {
                                         <div>
                                             <h4 className="font-medium text-gray-700 mb-2">Subject Lines:</h4>
                                             <ul className="text-gray-600 space-y-1">
-                                                <li>• "Informational Interview Request"</li>
+                                                <li>• "Informational Interview Request - [Your Name]"</li>
                                                 <li>• "Learning About [Company] Culture"</li>
                                                 <li>• "Developer Interested in [Company]"</li>
                                             </ul>
@@ -554,21 +576,13 @@ const App = () => {
                                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                                 OpenAI API Key (Required) *
                                             </label>
-                                            <div className="flex gap-2">
-                                                <input
-                                                    type="password"
-                                                    value={apiKeys.openai}
-                                                    onChange={(e) => setApiKeys(prev => ({ ...prev, openai: e.target.value }))}
-                                                    className="input"
-                                                    placeholder="sk-..."
-                                                />
-                                                <button
-                                                    onClick={() => handleTestAPI('openai')}
-                                                    className="btn btn-secondary whitespace-nowrap"
-                                                >
-                                                    Test
-                                                </button>
-                                            </div>
+                                            <input
+                                                type="password"
+                                                value={apiKeys.openai}
+                                                onChange={(e) => setApiKeys(prev => ({ ...prev, openai: e.target.value }))}
+                                                className="input"
+                                                placeholder="sk-..."
+                                            />
                                             <p className="text-xs text-gray-500 mt-1">
                                                 Get from: https://platform.openai.com/api-keys
                                             </p>
@@ -576,47 +590,31 @@ const App = () => {
 
                                         <div className="bg-white p-4 rounded border">
                                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Apollo.io API Key (Required) *
+                                                Apollo.io API Key (Company data)
                                             </label>
-                                            <div className="flex gap-2">
-                                                <input
-                                                    type="password"
-                                                    value={apiKeys.apollo}
-                                                    onChange={(e) => setApiKeys(prev => ({ ...prev, apollo: e.target.value }))}
-                                                    className="input"
-                                                    placeholder="Free tier: 50 credits/month"
-                                                />
-                                                <button
-                                                    onClick={() => handleTestAPI('apollo')}
-                                                    className="btn btn-secondary whitespace-nowrap"
-                                                >
-                                                    Test
-                                                </button>
-                                            </div>
+                                            <input
+                                                type="password"
+                                                value={apiKeys.apollo}
+                                                onChange={(e) => setApiKeys(prev => ({ ...prev, apollo: e.target.value }))}
+                                                className="input"
+                                                placeholder="Free tier: 50 credits/month"
+                                            />
                                             <p className="text-xs text-gray-500 mt-1">
-                                                Get from: https://www.apollo.io/ (Replaces Clearbit)
+                                                Get from: https://www.apollo.io/
                                             </p>
                                         </div>
 
                                         <div className="bg-white p-4 rounded border">
                                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Hunter.io API Key (Email verification)
+                                                Hunter.io API Key (Email finding)
                                             </label>
-                                            <div className="flex gap-2">
-                                                <input
-                                                    type="password"
-                                                    value={apiKeys.hunter}
-                                                    onChange={(e) => setApiKeys(prev => ({ ...prev, hunter: e.target.value }))}
-                                                    className="input"
-                                                    placeholder="Free tier: 25 searches/month"
-                                                />
-                                                <button
-                                                    onClick={() => handleTestAPI('hunter')}
-                                                    className="btn btn-secondary whitespace-nowrap"
-                                                >
-                                                    Test
-                                                </button>
-                                            </div>
+                                            <input
+                                                type="password"
+                                                value={apiKeys.hunter}
+                                                onChange={(e) => setApiKeys(prev => ({ ...prev, hunter: e.target.value }))}
+                                                className="input"
+                                                placeholder="Free tier: 25 searches/month"
+                                            />
                                             <p className="text-xs text-gray-500 mt-1">
                                                 Get from: https://hunter.io
                                             </p>
