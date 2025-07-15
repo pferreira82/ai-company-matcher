@@ -5,16 +5,32 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const profileRoutes = require('./routes/profile');
-const searchRoutes = require('./routes/aiSearch');
-const companyRoutes = require('./routes/companies');
-const emailRoutes = require('./routes/emails');
-const configRoutes = require('./routes/config');
-const logger = require('./utils/logger');
+// Add process timing
+const startTime = Date.now();
+console.log('🚀 Starting AI Company Matcher backend...');
 
+// Import logger with fallback
+let logger;
+try {
+    logger = require('./utils/logger');
+    logger.info(`⏱️  Logger initialized (${Date.now() - startTime}ms)`);
+} catch (error) {
+    // Fallback logger if utils/logger doesn't exist
+    logger = {
+        info: console.log,
+        error: console.error,
+        warn: console.warn,
+        debug: console.debug
+    };
+    logger.info(`⏱️  Fallback logger initialized (${Date.now() - startTime}ms)`);
+}
+
+// Initialize Express app FIRST
 const app = express();
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
+
+logger.info(`⚡ Express app initialized (${Date.now() - startTime}ms)`);
 
 // Security middleware
 app.use(helmet());
@@ -38,26 +54,77 @@ app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai-company-matcher', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-    .then(() => logger.info('✅ Connected to MongoDB'))
-    .catch(err => logger.error('❌ MongoDB connection error:', err));
+logger.info(`🔧 Middleware configured (${Date.now() - startTime}ms)`);
 
-// Test Redis connection (optional)
+// Initialize models to check for any schema issues
+try {
+    logger.info(`📄 Loading UserProfile model... (${Date.now() - startTime}ms)`);
+    require('./models/UserProfile');
+    logger.info(`✅ UserProfile model loaded (${Date.now() - startTime}ms)`);
+
+    logger.info(`📄 Loading Company model... (${Date.now() - startTime}ms)`);
+    require('./models/Company');
+    logger.info(`✅ Company model loaded (${Date.now() - startTime}ms)`);
+
+    logger.info(`📄 Loading SearchJob model... (${Date.now() - startTime}ms)`);
+    require('./models/SearchJob');
+    logger.info(`✅ SearchJob model loaded (${Date.now() - startTime}ms)`);
+
+    logger.info(`📄 All models loaded successfully (${Date.now() - startTime}ms)`);
+} catch (modelError) {
+    logger.error(`❌ Failed to load models at ${Date.now() - startTime}ms:`, {
+        message: modelError.message,
+        stack: modelError.stack,
+        name: modelError.name
+    });
+
+    logger.error('Model loading failed - this may cause issues later');
+}
+
+// Database connection
+logger.info(`🔌 Attempting to connect to MongoDB... (${Date.now() - startTime}ms)`);
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai-company-matcher')
+    .then(() => {
+        logger.info(`✅ Connected to MongoDB successfully (${Date.now() - startTime}ms)`);
+        return mongoose.connection.db.admin().ping();
+    })
+    .then(() => {
+        logger.info(`📊 MongoDB ping successful (${Date.now() - startTime}ms)`);
+    })
+    .catch(err => {
+        logger.error(`❌ MongoDB connection failed at ${Date.now() - startTime}ms:`, {
+            message: err.message,
+            code: err.code,
+            name: err.name
+        });
+        logger.warn('⚠️  Continuing without MongoDB - some features may not work');
+    });
+
+// MongoDB connection events
+mongoose.connection.on('error', (err) => {
+    logger.error('💥 MongoDB connection error:', err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+    logger.warn('🔌 MongoDB disconnected');
+});
+
+mongoose.connection.on('reconnected', () => {
+    logger.info('🔄 MongoDB reconnected');
+});
+
+// Redis connection
 let redisAvailable = false;
 try {
     const redis = require('redis');
+
     const client = redis.createClient({
-        host: process.env.REDIS_HOST || '127.0.0.1',
-        port: process.env.REDIS_PORT || 6379
+        url: process.env.REDIS_URL || 'redis://127.0.0.1:6379'
     });
 
     client.on('connect', () => {
         redisAvailable = true;
-        logger.info('✅ Connected to Redis');
+        logger.info(`✅ Connected to Redis (${Date.now() - startTime}ms)`);
     });
 
     client.on('error', (err) => {
@@ -65,19 +132,64 @@ try {
         logger.warn('⚠️  Redis not available:', err.message);
         logger.warn('⚠️  Search jobs will run synchronously without queue');
     });
+
+    // Connect to Redis
+    client.connect()
+        .then(() => {
+            redisAvailable = true;
+            logger.info(`✅ Redis connection established (${Date.now() - startTime}ms)`);
+        })
+        .catch(err => {
+            redisAvailable = false;
+            logger.warn(`⚠️  Redis connection failed at ${Date.now() - startTime}ms:`, err.message);
+            logger.warn('⚠️  Search jobs will run synchronously without queue');
+        });
+
 } catch (error) {
-    logger.warn('⚠️  Redis not configured, search jobs will run synchronously');
+    redisAvailable = false;
+    logger.warn(`⚠️  Redis not configured, search jobs will run synchronously (${Date.now() - startTime}ms)`);
 }
 
-// Routes
-app.use('/api/profile', profileRoutes);
-app.use('/api/search', searchRoutes);
-app.use('/api/companies', companyRoutes);
-app.use('/api/matches', companyRoutes);
-app.use('/api/email', emailRoutes);
-app.use('/api/config', configRoutes);
+// Import and register routes
+try {
+    logger.info(`📁 Loading routes... (${Date.now() - startTime}ms)`);
 
-// Health check
+    const profileRoutes = require('./routes/profile');
+    logger.info(`✅ Profile routes loaded (${Date.now() - startTime}ms)`);
+
+    const searchRoutes = require('./routes/aiSearch');
+    logger.info(`✅ Search routes loaded (${Date.now() - startTime}ms)`);
+
+    const companyRoutes = require('./routes/companies');
+    logger.info(`✅ Company routes loaded (${Date.now() - startTime}ms)`);
+
+    const emailRoutes = require('./routes/emails');
+    logger.info(`✅ Email routes loaded (${Date.now() - startTime}ms)`);
+
+    const configRoutes = require('./routes/config');
+    logger.info(`✅ Config routes loaded (${Date.now() - startTime}ms)`);
+
+    // Register routes with app
+    app.use('/api/profile', profileRoutes);
+    app.use('/api/search', searchRoutes);
+    app.use('/api/companies', companyRoutes);
+    app.use('/api/matches', companyRoutes);
+    app.use('/api/email', emailRoutes);
+    app.use('/api/config', configRoutes);
+
+    logger.info(`📁 All routes registered successfully (${Date.now() - startTime}ms)`);
+
+} catch (routeError) {
+    logger.error(`❌ Failed to load routes at ${Date.now() - startTime}ms:`, {
+        message: routeError.message,
+        stack: routeError.stack,
+        name: routeError.name
+    });
+
+    logger.error('Route loading failed - server may not work properly');
+}
+
+// Health check endpoint
 app.get('/health', (req, res) => {
     res.json({
         status: 'OK',
@@ -120,7 +232,7 @@ app.get('/api/status', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-    logger.error(err.stack);
+    logger.error('Express error occurred:', err.message);
     res.status(500).json({
         message: 'Something went wrong!',
         error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
@@ -133,18 +245,34 @@ app.use((req, res) => {
 });
 
 // Start server
-const server = app.listen(PORT, HOST, () => {
-    logger.info(`🚀 AI Company Matcher server running on http://${HOST}:${PORT}`);
-    logger.info(`📊 Health check: http://${HOST}:${PORT}/health`);
-    logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+let server;
+try {
+    server = app.listen(PORT, HOST, () => {
+        logger.info(`🚀 Server running on http://${HOST}:${PORT} (${Date.now() - startTime}ms)`);
+        logger.info(`📊 Health check: http://${HOST}:${PORT}/health`);
+        logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
-    // Log service status
-    setTimeout(() => {
-        logger.info(`📊 Service Status:`);
-        logger.info(`   MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected'}`);
-        logger.info(`   Redis: ${redisAvailable ? '✅ Connected' : '⚠️  Not Available'}`);
-    }, 2000);
-});
+        // Log service status after a delay
+        setTimeout(() => {
+            logger.info(`📊 Service Status:`);
+            logger.info(`   MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected'}`);
+            logger.info(`   Redis: ${redisAvailable ? '✅ Connected' : '⚠️  Not Available'}`);
+            logger.info(`   Real-time features: ${redisAvailable ? '✅ Enabled' : '⚠️  Limited (no queue)'}`);
+            logger.info(`🎉 Server startup completed! Total time: ${Date.now() - startTime}ms`);
+        }, 1000);
+    });
+
+    server.on('error', (err) => {
+        logger.error('Server error:', err.message);
+
+        if (err.code === 'EADDRINUSE') {
+            logger.error(`Port ${PORT} is already in use. Please stop the other service or change the port.`);
+        }
+    });
+} catch (error) {
+    logger.error('Failed to start server:', error);
+    process.exit(1);
+}
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
@@ -155,6 +283,34 @@ process.on('SIGTERM', () => {
             process.exit(0);
         });
     });
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('🚨 Unhandled Promise Rejection!');
+    logger.error('Reason:', reason);
+
+    if (process.env.NODE_ENV === 'production') {
+        logger.error('Shutting down due to unhandled rejection');
+        server.close(() => {
+            process.exit(1);
+        });
+    } else {
+        logger.warn('Continuing in development mode despite unhandled rejection');
+    }
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+    logger.error('🚨 Uncaught Exception!');
+    logger.error('Error:', err.message);
+
+    if (process.env.NODE_ENV === 'production') {
+        logger.error('Shutting down due to uncaught exception');
+        process.exit(1);
+    } else {
+        logger.warn('Continuing in development mode despite uncaught exception');
+    }
 });
 
 module.exports = app;

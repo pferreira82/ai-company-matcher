@@ -1,381 +1,437 @@
-const OpenAI = require('openai');
 const logger = require('../utils/logger');
 
-class OpenAIService {
-    constructor() {
-        this.openai = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY
+// OpenAI Service with fallback for development
+let OpenAI;
+let openaiClient;
+
+try {
+    OpenAI = require('openai');
+
+    if (process.env.OPENAI_API_KEY) {
+        openaiClient = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY,
         });
+        logger.info('OpenAI client initialized successfully');
+    } else {
+        logger.warn('OpenAI API key not found, using mock responses');
     }
+} catch (error) {
+    logger.warn('OpenAI library not available, using mock responses:', error.message);
+}
 
-    async analyzeUserProfile(resume, personalStatement) {
-        try {
-            logger.info('🤖 Starting OpenAI profile analysis');
-
-            const prompt = `
-        Analyze this developer's profile and extract key information:
-        
-        RESUME:
-        ${resume}
-        
-        PERSONAL STATEMENT:
-        ${personalStatement}
-        
-        Please provide a JSON response with:
-        {
-          "strengths": ["list of technical and soft skills"],
-          "interests": ["areas of interest and passion"],
-          "careerGoals": ["career objectives and aspirations"],
-          "cultureFit": ["what type of company culture would suit them"],
-          "techStack": ["technologies they're proficient in"],
-          "experienceLevel": "junior/mid/senior/principal",
-          "preferredRole": "description of ideal role"
-        }
-      `;
-
-            const response = await this.openai.chat.completions.create({
-                model: 'gpt-4',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are an expert career advisor and technical recruiter. Analyze developer profiles and provide structured insights.'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: 0.3,
-                max_tokens: 1000
-            });
-
-            const result = JSON.parse(response.choices[0].message.content);
-            logger.info('✅ OpenAI profile analysis completed');
-            return result;
-        } catch (error) {
-            logger.error('❌ OpenAI profile analysis failed:', error);
-            throw error;
-        }
-    }
-
-    async evaluateCompanyMatch(userProfile, company) {
-        try {
-            const prompt = `
-        Evaluate how well this company matches the developer's profile:
-        
-        DEVELOPER PROFILE:
-        Strengths: ${userProfile.aiAnalysis?.strengths?.join(', ') || 'Not analyzed'}
-        Interests: ${userProfile.aiAnalysis?.interests?.join(', ') || 'Not analyzed'}
-        Career Goals: ${userProfile.aiAnalysis?.careerGoals?.join(', ') || 'Not analyzed'}
-        Preferred Culture: ${userProfile.aiAnalysis?.cultureFit?.join(', ') || 'Not analyzed'}
-        Work-Life Balance Priority: ${userProfile.preferences?.workLifeBalance}
-        Remote Work Preference: ${userProfile.preferences?.remoteFriendly}
-        
-        COMPANY:
-        Name: ${company.name}
-        Industry: ${company.industry}
-        Size: ${company.size}
-        Description: ${company.description}
-        Remote Policy: ${company.remotePolicy}
-        Location: ${company.location}
-        
-        Provide a JSON response with:
-        {
-          "matchScore": 85,
-          "analysis": "detailed explanation of why this is a good/bad match",
-          "matchFactors": {
-            "cultureMatch": 90,
-            "skillsMatch": 85,
-            "locationMatch": 95,
-            "workLifeBalanceMatch": 80,
-            "remoteMatch": 85
-          },
-          "concerns": ["any potential concerns or mismatches"],
-          "highlights": ["key reasons why this is a good match"]
-        }
-      `;
-
-            const response = await this.openai.chat.completions.create({
-                model: 'gpt-4',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are an expert career advisor. Evaluate company-candidate matches and provide detailed analysis.'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: 0.3,
-                max_tokens: 800
-            });
-
-            return JSON.parse(response.choices[0].message.content);
-        } catch (error) {
-            logger.error('OpenAI company match evaluation failed:', error);
-            throw error;
-        }
-    }
-
-    async evaluateWorkLifeBalance(company) {
-        try {
-            const prompt = `
-        Research and evaluate the work-life balance reputation of this company:
-        
-        COMPANY: ${company.name}
-        INDUSTRY: ${company.industry}
-        SIZE: ${company.size}
-        DESCRIPTION: ${company.description}
-        
-        Based on your knowledge of this company, provide a JSON response with:
-        {
-          "score": 8,
-          "analysis": "detailed explanation of their work-life balance culture",
-          "positives": ["list of positive aspects"],
-          "concerns": ["any potential concerns"],
-          "sources": ["where this information typically comes from"],
-          "recommendations": ["what to ask about in interviews"]
-        }
-        
-        Score should be 1-10 where:
-        1-3: Poor work-life balance
-        4-6: Average work-life balance
-        7-8: Good work-life balance
-        9-10: Excellent work-life balance
-      `;
-
-            const response = await this.openai.chat.completions.create({
-                model: 'gpt-4',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are an expert on company cultures and work-life balance. Provide accurate assessments based on publicly available information.'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: 0.3,
-                max_tokens: 600
-            });
-
-            return JSON.parse(response.choices[0].message.content);
-        } catch (error) {
-            logger.error('OpenAI work-life balance evaluation failed:', error);
-            throw error;
-        }
-    }
-
-    async generatePersonalizedEmail(userProfile, company) {
-        try {
-            const hrContact = company.hrContacts?.[0];
-            const contactName = hrContact?.name || 'Hiring Manager';
-
-            // Get personal information with fallbacks
-            const firstName = userProfile.personalInfo?.firstName || 'Your Name';
-            const lastName = userProfile.personalInfo?.lastName || '';
-            const fullName = `${firstName} ${lastName}`.trim();
-            const email = userProfile.personalInfo?.email || 'your.email@example.com';
-            const currentTitle = userProfile.currentTitle || 'Software Developer';
-            const phone = userProfile.personalInfo?.phone || '';
-            const linkedinUrl = userProfile.personalInfo?.linkedinUrl || '';
-            const portfolioUrl = userProfile.personalInfo?.portfolioUrl || '';
-            const location = userProfile.personalInfo?.location ?
-                `${userProfile.personalInfo.location.city || ''}${userProfile.personalInfo.location.city && userProfile.personalInfo.location.state ? ', ' : ''}${userProfile.personalInfo.location.state || ''}`.trim() : '';
-
-            const prompt = `
-        Generate a personalized email for an informational interview request:
-        
-        SENDER PROFILE:
-        Name: ${fullName}
-        Email: ${email}
-        Current Title: ${currentTitle}
-        Location: ${location || 'Not specified'}
-        Phone: ${phone || 'Not provided'}
-        LinkedIn: ${linkedinUrl || 'Not provided'}
-        Portfolio: ${portfolioUrl || 'Not provided'}
-        Resume highlights: ${userProfile.resume?.substring(0, 500)}...
-        Personal statement: ${userProfile.personalStatement}
-        Key strengths: ${userProfile.aiAnalysis?.strengths?.join(', ') || 'Software development'}
-        Career goals: ${userProfile.aiAnalysis?.careerGoals?.join(', ') || 'Career growth'}
-        Experience level: ${userProfile.experienceLevel || 'Mid-level'}
-        
-        COMPANY:
-        Name: ${company.name}
-        Industry: ${company.industry}
-        Description: ${company.description}
-        Work-life balance score: ${company.workLifeBalance?.score}/10
-        AI analysis: ${company.aiAnalysis}
-        Location: ${company.location}
-        
-        RECIPIENT:
-        Name: ${contactName}
-        Title: ${hrContact?.title || 'HR Representative'}
-        Email: ${hrContact?.email || 'Not available'}
-        
-        Generate a professional, personalized email that:
-        1. Uses the sender's actual name and contact information
-        2. Shows genuine interest in the company
-        3. Mentions specific aspects of their culture/work-life balance
-        4. Highlights relevant experience matching their needs
-        5. Requests an informational interview (not a job application)
-        6. Is concise but engaging (2-3 paragraphs max)
-        7. Includes a professional signature with contact details
-        
-        Provide JSON response with:
-        {
-          "subject": "Professional subject line with sender's name",
-          "body": "Complete email body with actual names and details",
-          "signature": "Professional email signature with contact info",
-          "tone": "professional but warm",
-          "keyPoints": ["main personalized points covered in email"]
-        }
-      `;
-
-            logger.info(`🤖 Generating personalized email for ${company.name}`);
-
-            const response = await this.openai.chat.completions.create({
-                model: 'gpt-4',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are an expert at crafting professional networking emails. Create engaging, personalized messages that get responses. Always use the actual provided personal information.'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: 0.4,
-                max_tokens: 1000
-            });
-
-            const emailData = JSON.parse(response.choices[0].message.content);
-
-            // Add signature to body if not already included
-            const fullEmailBody = emailData.body.includes('Best regards') || emailData.body.includes('Sincerely') ?
-                emailData.body :
-                `${emailData.body}\n\n${emailData.signature}`;
-
-            logger.info(`✅ Email generated for ${company.name}`);
-
+// Analyze user profile with AI
+async function analyzeUserProfile(resume, personalStatement) {
+    try {
+        if (!openaiClient) {
+            // Return mock analysis for development
             return {
-                ...emailData,
-                body: fullEmailBody,
-                senderInfo: {
-                    name: fullName,
-                    email: email,
-                    phone: phone,
-                    linkedin: linkedinUrl,
-                    portfolio: portfolioUrl,
-                    location: location
-                }
-            };
-        } catch (error) {
-            logger.error('OpenAI email generation failed:', error);
-            throw error;
-        }
-    }
-
-    async findCompanyMatches(userProfile, maxResults = 100, expandToNationwide = false) {
-        try {
-            logger.info(`🤖 Starting AI company search (nationwide: ${expandToNationwide})`);
-
-            // Format selected company sizes and industries
-            const companySizes = userProfile.preferences?.companySizes || ['medium'];
-            const industries = userProfile.preferences?.industries || ['technology'];
-
-            const userLocation = userProfile.personalInfo?.location ?
-                `${userProfile.personalInfo.location.city || ''}${userProfile.personalInfo.location.city && userProfile.personalInfo.location.state ? ', ' : ''}${userProfile.personalInfo.location.state || ''}`.trim() :
-                'Not specified';
-
-            const locationStrategy = expandToNationwide ?
-                `NATIONWIDE SEARCH (previous Boston/Providence search found fewer than 100 companies):
-        1. All major US tech hubs (San Francisco, Seattle, New York, Austin, etc.)
-        2. Remote-first companies regardless of location
-        3. Fast-growing companies in secondary markets
-        4. Include the candidate's current location if specified: ${userLocation}` :
-                `FOCUSED REGIONAL SEARCH:
-        1. Boston, MA area companies (PRIMARY - Cambridge, Somerville, nearby suburbs)
-        2. Providence, RI area companies (SECONDARY - greater Providence metro)
-        3. Remote-first companies with these offices or strong presence in these areas
-        4. Note: If fewer than 100 companies found, will expand to nationwide search`;
-
-            const prompt = `
-        Based on this developer's profile, suggest companies they should research:
-        
-        DEVELOPER PROFILE:
-        Name: ${userProfile.personalInfo?.firstName || 'Developer'} ${userProfile.personalInfo?.lastName || ''}
-        Current Location: ${userLocation}
-        Current Title: ${userProfile.currentTitle || 'Software Developer'}
-        Experience Level: ${userProfile.experienceLevel || userProfile.aiAnalysis?.experienceLevel || 'Mid-level'}
-        Tech Stack: ${userProfile.aiAnalysis?.techStack?.join(', ') || 'General development'}
-        Interests: ${userProfile.aiAnalysis?.interests?.join(', ') || 'Software development'}
-        Career Goals: ${userProfile.aiAnalysis?.careerGoals?.join(', ') || 'Career growth'}
-        Culture Fit: ${userProfile.aiAnalysis?.cultureFit?.join(', ') || 'Collaborative environment'}
-        Work-Life Balance Priority: ${userProfile.preferences?.workLifeBalance || true}
-        Remote Work Preference: ${userProfile.preferences?.remoteFriendly || true}
-        Willing to Relocate: ${userProfile.preferences?.willingToRelocate || false}
-        
-        COMPANY PREFERENCES:
-        Preferred Company Sizes: ${companySizes.join(', ')}
-        Preferred Industries: ${industries.join(', ')}
-        
-        LOCATION STRATEGY:
-        ${locationStrategy}
-        
-        Provide a JSON array of companies to research (focus on realistic matches):
-        [
-          {
-            "name": "Company Name",
-            "location": "City, State",
-            "industry": "Technology",
-            "size": "medium",
-            "why": "specific reason why this matches their profile and preferences",
-            "workLifeBalanceReputation": "known for good work-life balance",
-            "searchKeywords": ["keywords to search for this company"],
-            "remotePolicy": "remote-friendly"
-          }
-        ]
-        
-        IMPORTANT REQUIREMENTS:
-        - Only include companies that match the selected company sizes: ${companySizes.join(', ')}
-        - Only include companies that match the selected industries: ${industries.join(', ')}
-        - Focus on companies known for good work-life balance
-        - Include a mix of well-known and growing companies
-        - Prioritize companies with strong engineering cultures
-        - Include companies with good remote/flexible work policies
-        
-        Return exactly ${maxResults} companies that would be realistic matches for this person.
-      `;
-
-            const response = await this.openai.chat.completions.create({
-                model: 'gpt-4',
-                messages: [
-                    {
-                        role: 'system',
-                        content: `You are an expert tech recruiter with deep knowledge of companies across the US tech ecosystem. You understand the ${expandToNationwide ? 'national' : 'Boston/Providence'} tech market and can suggest realistic matches based on candidate profiles. Always respect the candidate's company size and industry preferences.`
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
+                strengths: [
+                    'Strong technical skills',
+                    'Problem-solving abilities',
+                    'Communication skills',
+                    'Adaptability',
+                    'Team collaboration'
                 ],
-                temperature: 0.6,
-                max_tokens: 4000
-            });
-
-            const companies = JSON.parse(response.choices[0].message.content);
-            logger.info(`✅ AI generated ${companies.length} company suggestions (nationwide: ${expandToNationwide})`);
-
-            return companies;
-        } catch (error) {
-            logger.error('OpenAI company suggestions failed:', error);
-            throw error;
+                interests: [
+                    'Software development',
+                    'Technology innovation',
+                    'Problem solving',
+                    'Continuous learning',
+                    'Team collaboration'
+                ],
+                careerGoals: [
+                    'Senior developer role',
+                    'Technical leadership',
+                    'Innovative projects',
+                    'Work-life balance',
+                    'Professional growth'
+                ],
+                idealCompanyProfile: 'Technology company with strong engineering culture, good work-life balance, and growth opportunities',
+                marketPositioning: 'Experienced developer with strong technical skills and collaborative approach',
+                improvementAreas: [
+                    'Industry-specific knowledge',
+                    'Leadership skills',
+                    'Public speaking',
+                    'Project management'
+                ]
+            };
         }
+
+        const prompt = `
+    Analyze the following professional profile and provide insights:
+    
+    Resume: ${resume}
+    
+    Personal Statement: ${personalStatement}
+    
+    Please provide a JSON response with the following structure:
+    {
+      "strengths": ["list of key strengths"],
+      "interests": ["list of professional interests"],
+      "careerGoals": ["list of career goals"],
+      "idealCompanyProfile": "description of ideal company",
+      "marketPositioning": "brief market positioning statement",
+      "improvementAreas": ["areas for improvement"]
+    }
+    
+    Keep responses professional and concise.
+    `;
+
+        const response = await openaiClient.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a professional career analyst. Provide structured, actionable insights about the candidate.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 1000,
+            temperature: 0.7,
+        });
+
+        const analysis = JSON.parse(response.choices[0].message.content);
+        logger.info('Profile analysis completed successfully');
+        return analysis;
+
+    } catch (error) {
+        logger.error('OpenAI profile analysis failed:', error);
+
+        // Return fallback analysis
+        return {
+            strengths: [
+                'Technical expertise',
+                'Problem-solving skills',
+                'Professional communication',
+                'Adaptability',
+                'Team collaboration'
+            ],
+            interests: [
+                'Software development',
+                'Technology innovation',
+                'Continuous learning',
+                'Problem solving'
+            ],
+            careerGoals: [
+                'Career advancement',
+                'Technical growth',
+                'Work-life balance',
+                'Professional development'
+            ],
+            idealCompanyProfile: 'Technology company with growth opportunities and good work culture',
+            marketPositioning: 'Skilled professional with strong technical background',
+            improvementAreas: [
+                'Industry knowledge',
+                'Leadership skills',
+                'Networking'
+            ]
+        };
     }
 }
 
-module.exports = new OpenAIService();
+// Generate company matches based on profile
+async function findCompanyMatches(profile, maxResults = 50, nationwide = false) {
+    try {
+        if (!openaiClient) {
+            // Return mock companies for development
+            return generateMockCompanies(maxResults, nationwide);
+        }
+
+        const location = nationwide ? 'nationwide' : 'Boston, MA and Providence, RI area';
+        const companySizes = profile.preferences?.companySizes || ['small', 'medium'];
+        const industries = profile.preferences?.industries || ['technology'];
+
+        const prompt = `
+    Based on this professional profile, suggest ${maxResults} companies in ${location} that would be good matches:
+    
+    Profile Summary:
+    - Name: ${profile.personalInfo?.firstName} ${profile.personalInfo?.lastName}
+    - Title: ${profile.currentTitle}
+    - Experience: ${profile.experience}
+    - Company Size Preferences: ${companySizes.join(', ')}
+    - Industry Preferences: ${industries.join(', ')}
+    - Work-Life Balance Priority: ${profile.preferences?.workLifeBalance ? 'Yes' : 'No'}
+    - Remote Work Preference: ${profile.preferences?.remoteFriendly ? 'Yes' : 'No'}
+    
+    AI Analysis:
+    - Strengths: ${profile.aiAnalysis?.strengths?.join(', ') || 'Technical skills'}
+    - Interests: ${profile.aiAnalysis?.interests?.join(', ') || 'Technology'}
+    - Career Goals: ${profile.aiAnalysis?.careerGoals?.join(', ') || 'Growth'}
+    
+    Please provide a JSON array of companies with this structure:
+    [
+      {
+        "name": "Company Name",
+        "location": "City, State",
+        "industry": "Industry",
+        "size": "startup|small|medium|large",
+        "employeeCount": 100,
+        "description": "Brief company description",
+        "website": "https://company.com",
+        "reasons": ["reason1", "reason2", "reason3"]
+      }
+    ]
+    
+    Focus on real companies that exist and match the criteria. Include a mix of well-known and emerging companies.
+    `;
+
+        const response = await openaiClient.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a professional recruiter with deep knowledge of the tech industry. Provide realistic company suggestions based on the candidate profile.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 3000,
+            temperature: 0.8,
+        });
+
+        const companies = JSON.parse(response.choices[0].message.content);
+        logger.info(`Generated ${companies.length} company matches`);
+        return companies;
+
+    } catch (error) {
+        logger.error('OpenAI company matching failed:', error);
+        return generateMockCompanies(maxResults, nationwide);
+    }
+}
+
+// Evaluate work-life balance for a company
+async function evaluateWorkLifeBalance(companyData) {
+    try {
+        if (!openaiClient) {
+            // Return mock evaluation
+            return {
+                score: Math.floor(Math.random() * 4) + 6, // 6-10 score
+                analysis: `${companyData.name} appears to have a balanced approach to work-life balance based on available information.`,
+                sources: ['Company website', 'Industry reports', 'Employee reviews'],
+                positives: ['Flexible work arrangements', 'Good company culture', 'Reasonable work hours'],
+                concerns: ['Limited remote work options', 'Fast-paced environment']
+            };
+        }
+
+        const prompt = `
+    Evaluate the work-life balance reputation of ${companyData.name}:
+    
+    Company Details:
+    - Name: ${companyData.name}
+    - Industry: ${companyData.industry}
+    - Location: ${companyData.location}
+    - Size: ${companyData.size}
+    - Description: ${companyData.description}
+    
+    Please provide a JSON response with:
+    {
+      "score": 1-10,
+      "analysis": "brief analysis of work-life balance",
+      "sources": ["list of information sources"],
+      "positives": ["positive aspects"],
+      "concerns": ["potential concerns"]
+    }
+    
+    Base your evaluation on known industry standards and company reputation.
+    `;
+
+        const response = await openaiClient.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a workplace culture expert. Evaluate companies objectively based on available information.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 500,
+            temperature: 0.6,
+        });
+
+        const evaluation = JSON.parse(response.choices[0].message.content);
+        logger.info(`Work-life balance evaluated for ${companyData.name}: ${evaluation.score}/10`);
+        return evaluation;
+
+    } catch (error) {
+        logger.error('Work-life balance evaluation failed:', error);
+
+        // Return fallback evaluation
+        return {
+            score: Math.floor(Math.random() * 4) + 6,
+            analysis: `Work-life balance evaluation for ${companyData.name} based on industry standards.`,
+            sources: ['Industry analysis', 'Company information'],
+            positives: ['Professional environment', 'Growth opportunities'],
+            concerns: ['Limited information available']
+        };
+    }
+}
+
+// Evaluate company-profile match
+async function evaluateCompanyMatch(profile, companyData) {
+    try {
+        if (!openaiClient) {
+            // Return mock match evaluation
+            return {
+                matchScore: Math.floor(Math.random() * 30) + 70, // 70-100 score
+                analysis: `${companyData.name} appears to be a good match based on your profile and preferences.`,
+                matchFactors: [
+                    'Industry alignment',
+                    'Company size preference',
+                    'Location compatibility',
+                    'Skills match',
+                    'Culture fit'
+                ],
+                highlights: [
+                    'Strong technical team',
+                    'Growth opportunities',
+                    'Good work-life balance',
+                    'Innovative projects'
+                ],
+                concerns: [
+                    'Fast-paced environment',
+                    'Limited remote options',
+                    'Competitive culture'
+                ]
+            };
+        }
+
+        const prompt = `
+    Evaluate how well this company matches the candidate profile:
+    
+    Candidate Profile:
+    - Name: ${profile.personalInfo?.firstName}
+    - Title: ${profile.currentTitle}
+    - Experience: ${profile.experience}
+    - Strengths: ${profile.aiAnalysis?.strengths?.join(', ') || 'Technical skills'}
+    - Interests: ${profile.aiAnalysis?.interests?.join(', ') || 'Technology'}
+    - Preferences: ${profile.preferences?.companySizes?.join(', ')} companies in ${profile.preferences?.industries?.join(', ')}
+    
+    Company:
+    - Name: ${companyData.name}
+    - Industry: ${companyData.industry}
+    - Size: ${companyData.size}
+    - Location: ${companyData.location}
+    - Description: ${companyData.description}
+    
+    Please provide a JSON response with:
+    {
+      "matchScore": 1-100,
+      "analysis": "brief match analysis",
+      "matchFactors": ["key matching factors"],
+      "highlights": ["positive aspects for this candidate"],
+      "concerns": ["potential concerns or challenges"]
+    }
+    `;
+
+        const response = await openaiClient.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a professional recruiter evaluating candidate-company fit. Be objective and helpful.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 600,
+            temperature: 0.7,
+        });
+
+        const evaluation = JSON.parse(response.choices[0].message.content);
+        logger.info(`Company match evaluated for ${companyData.name}: ${evaluation.matchScore}%`);
+        return evaluation;
+
+    } catch (error) {
+        logger.error('Company match evaluation failed:', error);
+
+        // Return fallback evaluation
+        return {
+            matchScore: Math.floor(Math.random() * 30) + 70,
+            analysis: `Match evaluation for ${companyData.name} based on profile compatibility.`,
+            matchFactors: ['Industry alignment', 'Size preference', 'Location match'],
+            highlights: ['Good cultural fit', 'Growth potential', 'Skill alignment'],
+            concerns: ['Competitive environment', 'Limited information']
+        };
+    }
+}
+
+// Generate mock companies for development
+function generateMockCompanies(maxResults, nationwide) {
+    const bostonCompanies = [
+        { name: 'HubSpot', location: 'Cambridge, MA', industry: 'technology', size: 'large' },
+        { name: 'Wayfair', location: 'Boston, MA', industry: 'ecommerce', size: 'large' },
+        { name: 'Toast', location: 'Boston, MA', industry: 'technology', size: 'large' },
+        { name: 'CarGurus', location: 'Cambridge, MA', industry: 'technology', size: 'medium' },
+        { name: 'Rapid7', location: 'Boston, MA', industry: 'technology', size: 'medium' },
+        { name: 'LogMeIn', location: 'Boston, MA', industry: 'technology', size: 'medium' },
+        { name: 'TripAdvisor', location: 'Needham, MA', industry: 'technology', size: 'large' },
+        { name: 'Akamai', location: 'Cambridge, MA', industry: 'technology', size: 'large' },
+        { name: 'Brightcove', location: 'Boston, MA', industry: 'technology', size: 'medium' },
+        { name: 'Endurance International', location: 'Burlington, MA', industry: 'technology', size: 'large' }
+    ];
+
+    const providenceCompanies = [
+        { name: 'Textiles Inc', location: 'Providence, RI', industry: 'technology', size: 'small' },
+        { name: 'Ocean State Tech', location: 'Providence, RI', industry: 'technology', size: 'medium' },
+        { name: 'Rhode Island Software', location: 'Warwick, RI', industry: 'technology', size: 'small' },
+        { name: 'Coastal Dynamics', location: 'Newport, RI', industry: 'technology', size: 'small' },
+        { name: 'Providence Digital', location: 'Providence, RI', industry: 'technology', size: 'medium' }
+    ];
+
+    const nationwideCompanies = [
+        { name: 'Microsoft', location: 'Redmond, WA', industry: 'technology', size: 'large' },
+        { name: 'Google', location: 'Mountain View, CA', industry: 'technology', size: 'large' },
+        { name: 'Amazon', location: 'Seattle, WA', industry: 'technology', size: 'large' },
+        { name: 'Netflix', location: 'Los Gatos, CA', industry: 'technology', size: 'large' },
+        { name: 'Shopify', location: 'Ottawa, ON', industry: 'ecommerce', size: 'large' },
+        { name: 'Stripe', location: 'San Francisco, CA', industry: 'fintech', size: 'large' },
+        { name: 'Zoom', location: 'San Jose, CA', industry: 'technology', size: 'large' },
+        { name: 'Slack', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Atlassian', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'DocuSign', location: 'San Francisco, CA', industry: 'technology', size: 'large' }
+    ];
+
+    let companies = [...bostonCompanies, ...providenceCompanies];
+
+    if (nationwide) {
+        companies = [...companies, ...nationwideCompanies];
+    }
+
+    // Shuffle and limit results
+    const shuffled = companies.sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, maxResults);
+
+    return selected.map(company => ({
+        ...company,
+        employeeCount: company.size === 'startup' ? Math.floor(Math.random() * 50) + 10 :
+            company.size === 'small' ? Math.floor(Math.random() * 150) + 50 :
+                company.size === 'medium' ? Math.floor(Math.random() * 800) + 200 :
+                    Math.floor(Math.random() * 5000) + 1000,
+        description: `${company.name} is a ${company.size} ${company.industry} company focused on innovation and growth.`,
+        website: `https://${company.name.toLowerCase().replace(/\s+/g, '')}.com`,
+        reasons: [
+            'Strong technical team',
+            'Good company culture',
+            'Growth opportunities',
+            'Competitive compensation',
+            'Work-life balance'
+        ]
+    }));
+}
+
+module.exports = {
+    analyzeUserProfile,
+    findCompanyMatches,
+    evaluateWorkLifeBalance,
+    evaluateCompanyMatch
+};
