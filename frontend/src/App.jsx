@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Search, Database, Mail, Settings, Brain, Heart, MapPin } from 'lucide-react';
+import { User, Search, Database, Mail, Settings, Brain, Heart, MapPin, Zap, AlertCircle, CheckCircle } from 'lucide-react';
 
 // Components
 import CompanyCard from './components/CompanyCard';
@@ -19,10 +19,17 @@ const App = () => {
     const [emailModal, setEmailModal] = useState({ isOpen: false, company: null, template: null });
     const [apiKeys, setApiKeys] = useState({
         openai: '',
-        clearbit: '',
+        apollo: '',    // Updated: Apollo instead of Clearbit
         hunter: '',
         linkedin: '',
         crunchbase: ''
+    });
+    const [apiStatus, setApiStatus] = useState({
+        openai: 'disconnected',
+        apollo: 'disconnected',    // Updated: Apollo instead of Clearbit
+        hunter: 'disconnected',
+        linkedin: 'disconnected',
+        crunchbase: 'disconnected'
     });
 
     // Custom hooks
@@ -54,6 +61,18 @@ const App = () => {
             return;
         }
 
+        if (!apiKeys.openai) {
+            alert('OpenAI API key is required for AI analysis');
+            setActiveTab('config');
+            return;
+        }
+
+        if (!apiKeys.apollo) {
+            alert('Apollo.io API key is required for company data');
+            setActiveTab('config');
+            return;
+        }
+
         const result = await startSearch({
             profile,
             location: 'boston-providence',
@@ -82,6 +101,23 @@ const App = () => {
             setCompanies(prev =>
                 prev.map(c => c.id === companyId ? { ...c, status } : c)
             );
+        }
+    };
+
+    const handleTestAPI = async (apiName) => {
+        const apiKey = apiKeys[apiName];
+        if (!apiKey) {
+            alert(`Please enter ${apiName} API key first`);
+            return;
+        }
+
+        const result = await execute(() => configAPI.testConnection(apiName, apiKey));
+        if (result.success) {
+            setApiStatus(prev => ({ ...prev, [apiName]: 'connected' }));
+            alert(`${apiName} API connected successfully!`);
+        } else {
+            setApiStatus(prev => ({ ...prev, [apiName]: 'error' }));
+            alert(`${apiName} API connection failed: ${result.error}`);
         }
     };
 
@@ -119,10 +155,10 @@ const App = () => {
                     <div className="bg-blue-50 p-4 rounded-lg">
                         <h4 className="font-medium text-blue-800 mb-2">AI Analysis In Progress:</h4>
                         <div className="text-sm text-blue-700 space-y-1">
-                            <p>• ChatGPT analyzing your profile for cultural fit</p>
-                            <p>• Searching Boston/Providence tech companies</p>
-                            <p>• Evaluating work-life balance reputations</p>
-                            <p>• Finding HR contacts with Hunter.io</p>
+                            <p>• <Zap className="w-4 h-4 inline mr-1" />ChatGPT analyzing your profile for cultural fit</p>
+                            <p>• <Database className="w-4 h-4 inline mr-1" />Apollo.io searching Boston/Providence companies</p>
+                            <p>• <Heart className="w-4 h-4 inline mr-1" />AI evaluating work-life balance reputations</p>
+                            <p>• <Mail className="w-4 h-4 inline mr-1" />Finding verified HR contacts</p>
                         </div>
                     </div>
                 )}
@@ -133,8 +169,40 @@ const App = () => {
                         <p className="text-sm text-green-700">
                             Found {searchStatus.totalFound} companies with verified HR contacts
                         </p>
+                        {searchStatus.apiUsage && (
+                            <div className="mt-2 text-xs text-green-600">
+                                Apollo: {searchStatus.apiUsage.apollo?.companiesFound || 0} companies •
+                                Hunter: {searchStatus.apiUsage.hunter?.emailsFound || 0} emails •
+                                OpenAI: {searchStatus.apiUsage.openai?.calls || 0} calls
+                            </div>
+                        )}
                     </div>
                 )}
+            </div>
+        );
+    };
+
+    const ApiStatusIndicator = ({ status }) => {
+        const getStatusColor = () => {
+            switch(status) {
+                case 'connected': return 'text-green-600';
+                case 'error': return 'text-red-600';
+                default: return 'text-gray-400';
+            }
+        };
+
+        const getStatusIcon = () => {
+            switch(status) {
+                case 'connected': return <CheckCircle className="w-4 h-4" />;
+                case 'error': return <AlertCircle className="w-4 h-4" />;
+                default: return <div className="w-4 h-4 border-2 border-gray-400 rounded-full" />;
+            }
+        };
+
+        return (
+            <div className={`flex items-center gap-2 ${getStatusColor()}`}>
+                {getStatusIcon()}
+                <span className="capitalize">{status}</span>
             </div>
         );
     };
@@ -149,10 +217,26 @@ const App = () => {
                         <h1 className="text-3xl font-bold text-gradient">
                             AI Company Matcher
                         </h1>
+                        <div className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
+                            Apollo.io Powered
+                        </div>
                     </div>
                     <p className="text-gray-600">
                         Find companies that match your profile and prioritize work-life balance in Boston/Providence area
                     </p>
+                </div>
+
+                {/* API Status Dashboard */}
+                <div className="card p-4 mb-6">
+                    <h3 className="text-sm font-medium text-gray-700 mb-3">API Status</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        {Object.entries(apiStatus).map(([api, status]) => (
+                            <div key={api} className="flex items-center justify-between">
+                                <span className="text-sm font-medium capitalize">{api === 'apollo' ? 'Apollo.io' : api}</span>
+                                <ApiStatusIndicator status={status} />
+                            </div>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Navigation */}
@@ -320,17 +404,17 @@ const App = () => {
                                 <div className="bg-blue-50 p-6 rounded-lg">
                                     <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center gap-2">
                                         <Brain className="w-5 h-5" />
-                                        How It Works
+                                        Apollo.io Integration
                                     </h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-700">
                                         <ul className="space-y-2">
                                             <li>• AI analyzes your resume and personal statement</li>
-                                            <li>• Searches for companies matching your profile</li>
-                                            <li>• Prioritizes Boston and Providence area companies</li>
+                                            <li>• Apollo.io searches Boston/Providence companies</li>
+                                            <li>• Finds verified HR contacts automatically</li>
                                         </ul>
                                         <ul className="space-y-2">
-                                            <li>• Evaluates work-life balance reputation using AI</li>
-                                            <li>• Finds verified HR contacts via Hunter.io</li>
+                                            <li>• AI evaluates work-life balance reputation</li>
+                                            <li>• Hunter.io verifies email addresses</li>
                                             <li>• Generates personalized email templates</li>
                                         </ul>
                                     </div>
@@ -411,7 +495,7 @@ const App = () => {
                                                 <li>• Your technical background and experience</li>
                                                 <li>• Company's work-life balance culture</li>
                                                 <li>• Relevant skills matching their needs</li>
-                                                <li>• HR contact's name and title</li>
+                                                <li>• HR contact's name and title from Apollo.io</li>
                                             </ul>
                                         </div>
                                         <div>
@@ -470,13 +554,21 @@ const App = () => {
                                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                                 OpenAI API Key (Required) *
                                             </label>
-                                            <input
-                                                type="password"
-                                                value={apiKeys.openai}
-                                                onChange={(e) => setApiKeys(prev => ({ ...prev, openai: e.target.value }))}
-                                                className="input"
-                                                placeholder="sk-..."
-                                            />
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="password"
+                                                    value={apiKeys.openai}
+                                                    onChange={(e) => setApiKeys(prev => ({ ...prev, openai: e.target.value }))}
+                                                    className="input"
+                                                    placeholder="sk-..."
+                                                />
+                                                <button
+                                                    onClick={() => handleTestAPI('openai')}
+                                                    className="btn btn-secondary whitespace-nowrap"
+                                                >
+                                                    Test
+                                                </button>
+                                            </div>
                                             <p className="text-xs text-gray-500 mt-1">
                                                 Get from: https://platform.openai.com/api-keys
                                             </p>
@@ -484,33 +576,49 @@ const App = () => {
 
                                         <div className="bg-white p-4 rounded border">
                                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Hunter.io API Key (Email finding)
+                                                Apollo.io API Key (Required) *
                                             </label>
-                                            <input
-                                                type="password"
-                                                value={apiKeys.hunter}
-                                                onChange={(e) => setApiKeys(prev => ({ ...prev, hunter: e.target.value }))}
-                                                className="input"
-                                                placeholder="Free tier: 25 searches/month"
-                                            />
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="password"
+                                                    value={apiKeys.apollo}
+                                                    onChange={(e) => setApiKeys(prev => ({ ...prev, apollo: e.target.value }))}
+                                                    className="input"
+                                                    placeholder="Free tier: 50 credits/month"
+                                                />
+                                                <button
+                                                    onClick={() => handleTestAPI('apollo')}
+                                                    className="btn btn-secondary whitespace-nowrap"
+                                                >
+                                                    Test
+                                                </button>
+                                            </div>
                                             <p className="text-xs text-gray-500 mt-1">
-                                                Get from: https://hunter.io
+                                                Get from: https://www.apollo.io/ (Replaces Clearbit)
                                             </p>
                                         </div>
 
                                         <div className="bg-white p-4 rounded border">
                                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Clearbit API Key (Company data)
+                                                Hunter.io API Key (Email verification)
                                             </label>
-                                            <input
-                                                type="password"
-                                                value={apiKeys.clearbit}
-                                                onChange={(e) => setApiKeys(prev => ({ ...prev, clearbit: e.target.value }))}
-                                                className="input"
-                                                placeholder="Free tier: 100 requests/month"
-                                            />
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="password"
+                                                    value={apiKeys.hunter}
+                                                    onChange={(e) => setApiKeys(prev => ({ ...prev, hunter: e.target.value }))}
+                                                    className="input"
+                                                    placeholder="Free tier: 25 searches/month"
+                                                />
+                                                <button
+                                                    onClick={() => handleTestAPI('hunter')}
+                                                    className="btn btn-secondary whitespace-nowrap"
+                                                >
+                                                    Test
+                                                </button>
+                                            </div>
                                             <p className="text-xs text-gray-500 mt-1">
-                                                Get from: https://clearbit.com
+                                                Get from: https://hunter.io
                                             </p>
                                         </div>
                                     </div>
