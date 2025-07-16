@@ -40,3 +40,430 @@
 .read-the-docs {
   color: #888;
 }
+
+/* Additional CSS for Enhanced Companies Table - Add to index.css */
+
+/* Enhanced Table Styles */
+.companies-table {
+  @apply bg-white rounded-lg border overflow-hidden shadow-sm;
+}
+
+.companies-table table {
+  @apply w-full min-w-full;
+}
+
+.companies-table thead {
+  @apply bg-gray-50 border-b border-gray-200;
+}
+
+.companies-table th {
+  @apply text-left py-3 px-4 font-medium text-gray-700 text-sm uppercase tracking-wider;
+}
+
+.companies-table tbody {
+  @apply bg-white divide-y divide-gray-200;
+}
+
+.companies-table tr {
+  @apply hover:bg-gray-50 transition-colors duration-150;
+}
+
+.companies-table td {
+  @apply py-4 px-4 text-sm text-gray-900 whitespace-nowrap;
+}
+
+/* Responsive table for mobile */
+@media (max-width: 768px) {
+  .companies-table {
+    @apply overflow-x-auto;
+  }
+
+  .companies-table table {
+    @apply min-w-max;
+  }
+
+  .companies-table th,
+  .companies-table td {
+    @apply px-2 py-3 text-xs;
+  }
+}
+
+/* Contact Card Styles */
+.hr-contact-card {
+  @apply bg-green-50 border border-green-200 rounded-lg p-3 space-y-2;
+}
+
+.hr-contact-card.verified {
+  @apply bg-blue-50 border-blue-200;
+}
+
+.hr-contact-name {
+  @apply font-medium text-green-800 text-sm;
+}
+
+.hr-contact-name.verified {
+  @apply text-blue-800;
+}
+
+.hr-contact-title {
+  @apply text-xs text-green-700;
+}
+
+.hr-contact-title.verified {
+  @apply text-blue-700;
+}
+
+.hr-contact-email {
+  @apply flex items-center gap-1 text-xs text-green-600;
+}
+
+.hr-contact-email.verified {
+  @apply text-blue-600;
+}
+
+.hr-contact-meta {
+  @apply text-xs text-green-600 flex items-center gap-2;
+}
+
+.hr-contact-meta.verified {
+  @apply text-blue-600;
+}
+
+/* No Contact State */
+.no-contact-state {
+  @apply text-center py-3 text-gray-400;
+}
+
+.no-contact-icon {
+  @apply w-4 h-4 mx-auto mb-1 text-gray-300;
+}
+
+.no-contact-text {
+  @apply text-xs text-gray-500;
+}
+
+/* Match Score Badges */
+.match-score-badge {
+  @apply text-xs px-2 py-1 rounded-full font-medium inline-flex items-center;
+}
+
+.match-score-excellent {
+  @apply bg-green-100 text-green-800;
+}
+
+.match-score-good {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.match-score-average {
+  @apply bg-yellow-100 text-yellow-800;
+}
+
+.match-score-poor {
+  @apply bg-gray-100 text-gray-800;
+}
+
+/* Work-Life Balance Indicators */
+.wlb-indicator {
+  @apply text-xs text-gray-600 flex items-center gap-1;
+}
+
+.wlb-score-excellent {
+  @apply text-green-600;
+}
+
+.wlb-score-good {
+  @apply text-yellow-600;
+}
+
+.wlb-score-poor {
+  @apply text-red-600;
+}
+
+/* Email Status Indicators */
+.email-status {
+  @apply flex items-center gap-2 text-sm;
+}
+
+.email-status-none {
+  @apply text-gray-400;
+}
+
+.email-status-draft {
+  @apply text-yellow-600;
+}
+
+.email-status-sent {
+  @apply text-green-600;
+}
+
+.email-count {
+  @apply text-xs text-gray-500 mt-1;
+}
+
+/* Filter Section */
+.filter-section {
+  @apply bg-white p-4 rounded-lg border space-y-4;
+}
+
+.filter-label {
+  @apply block text-xs font-medium text-gray-600 mb-1;
+}
+
+.filter-input {
+  @apply w-full py-2 px-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors;
+}
+
+.search-input {
+  @apply pl-10 pr-3 py-2 border border-gray-300 rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+}
+
+.search-icon {
+  @apply w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400;
+}
+
+/* Bulk Actions */
+.bulk-actions {
+  @apply flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg p-3;
+}
+
+.bulk-actions-text {
+  @apply text-sm text-blue-700 font-medium;
+}
+
+.bulk-actions-select {
+  @apply text-sm border border-blue-300 rounded px-2 py-1 bg-white focus:ring-2 focus:ring-blue-500;
+}
+
+/* Summary Statistics */
+.summary-stats {
+  @apply bg-white p-4 rounded-lg border;
+}
+
+.summary-stats-grid {
+  @apply grid grid-cols-2 md:grid-cols-4 gap-4 text-sm;
+}
+
+.summary-stat-item {
+  @apply text-center;
+}
+
+.summary-stat-label {
+  @apply text-gray-600 text-xs mb-1;
+}
+
+.summary-stat-value {
+  @apply font-semibold text-lg;
+}
+
+.summary-stat-value.contacts {
+  @apply text-green-600;
+}
+
+.summary-stat-value.emails {
+  @apply text-blue-600;
+}
+
+.summary-stat-value.matches {
+  @apply text-purple-600;
+}
+
+.summary-stat-value.contacted {
+  @apply text-yellow-600;
+}
+
+/* Action Buttons */
+.action-button-group {
+  @apply flex flex-col gap-2;
+}
+
+.action-button-primary {
+  @apply btn btn-primary text-xs px-3 py-1 flex items-center gap-1 justify-center;
+}
+
+.action-button-secondary {
+  @apply text-xs border border-gray-300 rounded px-2 py-1 bg-white focus:ring-2 focus:ring-blue-500;
+}
+
+/* Local Priority Badge */
+.local-priority-badge {
+  @apply flex items-center gap-1 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full;
+}
+
+.local-priority-icon {
+  @apply w-3 h-3 fill-current;
+}
+
+/* Company Info Section */
+.company-info {
+  @apply flex items-start gap-3;
+}
+
+.company-main-info {
+  @apply flex-1;
+}
+
+.company-name {
+  @apply font-semibold text-gray-900 flex items-center gap-2;
+}
+
+.company-details {
+  @apply text-sm text-gray-600 mt-1 space-y-1;
+}
+
+.company-detail-item {
+  @apply flex items-center gap-1;
+}
+
+.company-detail-icon {
+  @apply w-3 h-3 text-gray-400;
+}
+
+.company-website-link {
+  @apply text-blue-600 hover:underline text-xs transition-colors;
+}
+
+/* Selection Checkboxes */
+.selection-checkbox {
+  @apply w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500;
+}
+
+/* Empty State */
+.empty-state {
+  @apply text-center py-12;
+}
+
+.empty-state-icon {
+  @apply w-12 h-12 text-gray-300 mx-auto mb-4;
+}
+
+.empty-state-title {
+  @apply text-lg font-medium text-gray-600 mb-2;
+}
+
+.empty-state-description {
+  @apply text-gray-500 max-w-md mx-auto;
+}
+
+/* Loading States */
+.loading-row {
+  @apply animate-pulse;
+}
+
+.loading-cell {
+  @apply bg-gray-200 rounded h-4 w-full;
+}
+
+.loading-avatar {
+  @apply bg-gray-200 rounded-full h-8 w-8;
+}
+
+/* Status Transitions */
+.status-transition {
+  @apply transition-all duration-200 ease-in-out;
+}
+
+/* Hover Effects */
+.hoverable-row:hover {
+  @apply bg-gray-50 shadow-sm;
+}
+
+.hoverable-row:hover .company-name {
+  @apply text-blue-600;
+}
+
+/* Focus States */
+.focus-visible:focus {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+}
+
+/* Print Styles */
+@media print {
+  .filter-section,
+  .bulk-actions,
+  .action-button-group {
+    @apply hidden;
+  }
+
+  .companies-table {
+    @apply shadow-none border border-gray-300;
+  }
+
+  .companies-table tr:hover {
+    @apply bg-white;
+  }
+}
+
+/* Dark Mode Styles (for future implementation) */
+@media (prefers-color-scheme: dark) {
+  .companies-table {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .companies-table th {
+    @apply bg-gray-700 text-gray-300;
+  }
+
+  .companies-table td {
+    @apply text-gray-100;
+  }
+
+  .companies-table tr:hover {
+    @apply bg-gray-700;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  .companies-table {
+    @apply border-2 border-gray-900;
+  }
+
+  .match-score-badge,
+  .status-badge {
+    @apply border border-current;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .status-transition,
+  .hoverable-row,
+  .action-button-primary,
+  .action-button-secondary {
+    @apply transition-none;
+  }
+}
+
+/* Accessibility Improvements */
+.sr-only {
+  @apply absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0;
+}
+
+.focus-trap {
+  @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+}
+
+/* Mobile Specific Styles */
+@media (max-width: 640px) {
+  .summary-stats-grid {
+    @apply grid-cols-2 gap-3;
+  }
+
+  .filter-section {
+    @apply p-3;
+  }
+
+  .companies-table th,
+  .companies-table td {
+    @apply px-2 py-2;
+  }
+
+  .action-button-group {
+    @apply flex-row gap-1;
+  }
+
+  .action-button-primary {
+    @apply text-xs px-2 py-1;
+  }
+}

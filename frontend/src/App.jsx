@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { User, Search, Database, Mail, Settings, Brain, Heart, MapPin, Bug, BarChart3 } from 'lucide-react';
 
 // Components
-import ProfileTab from './components/ProfileTab';
 import CompanyCard from './components/CompanyCard';
 import EmailModal from './components/EmailModal';
 import RealTimeStatsDashboard from './components/RealTimeStatsDashboard';
+import CompaniesTable from './components/CompaniesTable'; // New enhanced table component
 
 // Hooks
 import { useProfile } from './hooks/useProfile';
@@ -13,11 +13,11 @@ import { useSearch } from './hooks/useSearch';
 import { useAPI } from './hooks/useAPI';
 
 // Services
-import { companiesAPI, emailAPI, configAPI, debugAPI } from './services/api';
+import { companiesAPI, emailAPI, configAPI } from './services/api';
 
 const App = () => {
     const [activeTab, setActiveTab] = useState('profile');
-    const [companies, setCompanies] = useState([]);
+    const [companies, setCompanies] = useState([]); // Initialize as empty array
     const [emailModal, setEmailModal] = useState({ isOpen: false, company: null, template: null });
     const [apiKeys, setApiKeys] = useState({
         openai: '',
@@ -28,7 +28,7 @@ const App = () => {
     });
 
     // API Logging state
-    const [apiLoggingEnabled, setApiLoggingEnabled] = useState(() => debugAPI.isLoggingEnabled());
+    const [apiLoggingEnabled, setApiLoggingEnabled] = useState(false);
     const [apiStats, setApiStats] = useState(null);
 
     // Custom hooks
@@ -45,44 +45,37 @@ const App = () => {
 
     useEffect(() => {
         loadCompanies();
-        updateApiStats();
     }, []);
 
-    // Update API stats periodically when logging is enabled
-    useEffect(() => {
-        if (apiLoggingEnabled) {
-            const interval = setInterval(updateApiStats, 5000);
-            return () => clearInterval(interval);
-        }
-    }, [apiLoggingEnabled]);
-
-    const updateApiStats = () => {
-        if (debugAPI.isLoggingEnabled()) {
-            setApiStats(debugAPI.getStats());
-        }
-    };
-
-    const toggleApiLogging = () => {
-        const newState = debugAPI.toggleLogging();
-        setApiLoggingEnabled(newState);
-        updateApiStats();
-    };
-
-    const clearApiLogs = () => {
-        if (confirm('Are you sure you want to clear all API logs?')) {
-            debugAPI.clearLogs();
-            updateApiStats();
-        }
-    };
-
-    const exportApiLogs = () => {
-        debugAPI.exportLogs();
-    };
-
     const loadCompanies = async () => {
-        const result = await execute(() => companiesAPI.getMatches());
-        if (result.success) {
-            setCompanies(result.data.data || []);
+        console.log('🔍 Loading companies...');
+        try {
+            const result = await execute(() => companiesAPI.getMatches());
+            console.log('📦 Raw API result:', result);
+            console.log('📦 Result success:', result.success);
+            console.log('📦 Result data:', result.data);
+
+            if (result.success && result.data) {
+                // Handle different response structures
+                if (Array.isArray(result.data)) {
+                    console.log('✅ Setting companies directly (array):', result.data.length, 'companies');
+                    setCompanies(result.data);
+                } else if (Array.isArray(result.data.data)) {
+                    console.log('✅ Setting companies from data.data:', result.data.data.length, 'companies');
+                    setCompanies(result.data.data);
+                } else {
+                    console.warn('⚠️ Unexpected data structure:', result.data);
+                    console.log('📊 Data keys:', Object.keys(result.data));
+                    setCompanies([]);
+                }
+            } else {
+                console.warn('⚠️ API call unsuccessful or no data');
+                console.log('❌ Result:', result);
+                setCompanies([]);
+            }
+        } catch (error) {
+            console.error('❌ Error loading companies:', error);
+            setCompanies([]);
         }
     };
 
@@ -90,6 +83,7 @@ const App = () => {
         // Validate required fields
         if (!profile.resume || !profile.personalStatement) {
             alert('Please complete your resume and personal statement first');
+            setActiveTab('profile');
             return;
         }
 
@@ -248,51 +242,6 @@ const App = () => {
 
                         {/* Right side controls */}
                         <div className="flex items-center gap-4">
-                            {/* API Logging Toggle */}
-                            <div className="flex items-center gap-3">
-                                <button
-                                    onClick={toggleApiLogging}
-                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                        apiLoggingEnabled
-                                            ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                                    title="Toggle API call logging in browser console"
-                                >
-                                    <Bug className="w-4 h-4" />
-                                    API Logs {apiLoggingEnabled ? 'ON' : 'OFF'}
-                                </button>
-
-                                {apiLoggingEnabled && apiStats && (
-                                    <div className="flex items-center gap-2 text-xs text-gray-600">
-                                        <BarChart3 className="w-4 h-4" />
-                                        <span>{apiStats.total} calls</span>
-                                        {apiStats.errors > 0 && (
-                                            <span className="text-red-600">({apiStats.errors} errors)</span>
-                                        )}
-                                    </div>
-                                )}
-
-                                {apiLoggingEnabled && (
-                                    <div className="flex gap-1">
-                                        <button
-                                            onClick={clearApiLogs}
-                                            className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
-                                            title="Clear API logs"
-                                        >
-                                            Clear
-                                        </button>
-                                        <button
-                                            onClick={exportApiLogs}
-                                            className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
-                                            title="Export API logs"
-                                        >
-                                            Export
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
                             {/* Profile Completeness */}
                             <div className="text-right">
                                 <div className="text-sm text-gray-600 mb-1">Profile Completeness</div>
@@ -313,23 +262,6 @@ const App = () => {
                     <p className="text-gray-600 mt-2">
                         Find companies that match your profile in Boston, MA → Providence, RI → Nationwide
                     </p>
-
-                    {/* API Logging Status Details */}
-                    {apiLoggingEnabled && (
-                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                            <div className="flex items-center gap-2 text-blue-800 text-sm">
-                                <Bug className="w-4 h-4" />
-                                <span className="font-medium">API Logging Active</span>
-                                <span>- Check your browser console for detailed API call logs</span>
-                            </div>
-                            {apiStats && (
-                                <div className="mt-2 text-xs text-blue-700">
-                                    Total: {apiStats.total} | Requests: {apiStats.requests} | Responses: {apiStats.responses} |
-                                    Errors: {apiStats.errors} | Success Rate: {(100 - parseFloat(apiStats.errorRate)).toFixed(1)}%
-                                </div>
-                            )}
-                        </div>
-                    )}
                 </div>
 
                 {/* Navigation */}
@@ -338,7 +270,7 @@ const App = () => {
                         {[
                             { id: 'profile', label: 'My Profile', icon: User },
                             { id: 'search', label: 'AI Search', icon: Search },
-                            { id: 'matches', label: 'Company Matches', icon: Database },
+                            { id: 'matches', label: 'Company Database', icon: Database },
                             { id: 'emails', label: 'Email Guide', icon: Mail },
                             { id: 'config', label: 'API Config', icon: Settings }
                         ].map(tab => {
@@ -358,6 +290,11 @@ const App = () => {
                                     {tab.id === 'profile' && profileStats.percentage < 100 && (
                                         <div className="w-2 h-2 bg-orange-400 rounded-full" />
                                     )}
+                                    {tab.id === 'matches' && companies.length > 0 && (
+                                        <span className="bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full">
+                                            {companies.length}
+                                        </span>
+                                    )}
                                 </button>
                             );
                         })}
@@ -366,13 +303,214 @@ const App = () => {
                     <div className="p-6">
                         {/* Profile Tab */}
                         {activeTab === 'profile' && (
-                            <ProfileTab
-                                profile={profile}
-                                updateProfile={updateProfile}
-                                updatePreferences={updatePreferences}
-                                handleSaveProfile={handleSaveProfile}
-                                profileLoading={profileLoading}
-                            />
+                            <div className="space-y-6">
+                                <h2 className="text-2xl font-bold text-gray-800">Your Professional Profile</h2>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    <div className="space-y-6">
+                                        <div className="bg-gray-50 p-6 rounded-lg">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                First Name *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={profile.personalInfo?.firstName || ''}
+                                                onChange={(e) => updateProfile({
+                                                    personalInfo: { ...profile.personalInfo, firstName: e.target.value }
+                                                })}
+                                                className="input"
+                                                placeholder="Your first name"
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="bg-gray-50 p-6 rounded-lg">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Last Name *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={profile.personalInfo?.lastName || ''}
+                                                onChange={(e) => updateProfile({
+                                                    personalInfo: { ...profile.personalInfo, lastName: e.target.value }
+                                                })}
+                                                className="input"
+                                                placeholder="Your last name"
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="bg-gray-50 p-6 rounded-lg">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Email *
+                                            </label>
+                                            <input
+                                                type="email"
+                                                value={profile.personalInfo?.email || ''}
+                                                onChange={(e) => updateProfile({
+                                                    personalInfo: { ...profile.personalInfo, email: e.target.value }
+                                                })}
+                                                className="input"
+                                                placeholder="your.email@example.com"
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="bg-gray-50 p-6 rounded-lg">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Current Title *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={profile.currentTitle || ''}
+                                                onChange={(e) => updateProfile({ currentTitle: e.target.value })}
+                                                className="input"
+                                                placeholder="e.g. Software Engineer, Product Manager"
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="bg-gray-50 p-6 rounded-lg">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Resume Content *
+                                            </label>
+                                            <textarea
+                                                value={profile.resume || ''}
+                                                onChange={(e) => updateProfile({ resume: e.target.value })}
+                                                className="textarea h-40"
+                                                placeholder="Paste your resume content here..."
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="bg-gray-50 p-6 rounded-lg">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Personal Statement *
+                                            </label>
+                                            <textarea
+                                                value={profile.personalStatement || ''}
+                                                onChange={(e) => updateProfile({ personalStatement: e.target.value })}
+                                                className="textarea h-32"
+                                                placeholder="What are you looking for in your next role?"
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        <div className="bg-gray-50 p-6 rounded-lg">
+                                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Work Preferences</h3>
+                                            <div className="space-y-4">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        Company Sizes *
+                                                    </label>
+                                                    <div className="space-y-2">
+                                                        {['startup', 'small', 'medium', 'large'].map(size => (
+                                                            <label key={size} className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={profile.preferences?.companySizes?.includes(size) || false}
+                                                                    onChange={(e) => {
+                                                                        const sizes = profile.preferences?.companySizes || [];
+                                                                        if (e.target.checked) {
+                                                                            updatePreferences({ companySizes: [...sizes, size] });
+                                                                        } else {
+                                                                            updatePreferences({ companySizes: sizes.filter(s => s !== size) });
+                                                                        }
+                                                                    }}
+                                                                    className="w-4 h-4 text-blue-600 rounded"
+                                                                />
+                                                                <span className="capitalize">{size} ({
+                                                                    size === 'startup' ? '1-50 employees' :
+                                                                        size === 'small' ? '51-200 employees' :
+                                                                            size === 'medium' ? '201-1000 employees' :
+                                                                                '1000+ employees'
+                                                                })</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        Industries *
+                                                    </label>
+                                                    <div className="space-y-2">
+                                                        {['technology', 'fintech', 'healthcare', 'ecommerce', 'biotech'].map(industry => (
+                                                            <label key={industry} className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={profile.preferences?.industries?.includes(industry) || false}
+                                                                    onChange={(e) => {
+                                                                        const industries = profile.preferences?.industries || [];
+                                                                        if (e.target.checked) {
+                                                                            updatePreferences({ industries: [...industries, industry] });
+                                                                        } else {
+                                                                            updatePreferences({ industries: industries.filter(i => i !== industry) });
+                                                                        }
+                                                                    }}
+                                                                    className="w-4 h-4 text-blue-600 rounded"
+                                                                />
+                                                                <span className="capitalize">{industry}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <label className="flex items-center gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={profile.preferences?.workLifeBalance || false}
+                                                        onChange={(e) => updatePreferences({ workLifeBalance: e.target.checked })}
+                                                        className="w-4 h-4 text-blue-600 rounded"
+                                                    />
+                                                    <Heart className="w-4 h-4 text-red-500" />
+                                                    <span>Work-Life Balance Priority</span>
+                                                </label>
+
+                                                <label className="flex items-center gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={profile.preferences?.remoteFriendly || false}
+                                                        onChange={(e) => updatePreferences({ remoteFriendly: e.target.checked })}
+                                                        className="w-4 h-4 text-blue-600 rounded"
+                                                    />
+                                                    <MapPin className="w-4 h-4 text-blue-500" />
+                                                    <span>Remote-Friendly</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        {profile.aiAnalysis && (
+                                            <div className="bg-blue-50 p-6 rounded-lg">
+                                                <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center gap-2">
+                                                    <Brain className="w-5 h-5" />
+                                                    AI Analysis
+                                                </h3>
+                                                <div className="space-y-3 text-sm">
+                                                    <div>
+                                                        <h4 className="font-medium text-blue-700">Strengths:</h4>
+                                                        <p className="text-blue-600">{profile.aiAnalysis.strengths?.join(', ') || 'Not analyzed yet'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="font-medium text-blue-700">Career Goals:</h4>
+                                                        <p className="text-blue-600">{profile.aiAnalysis.careerGoals?.join(', ') || 'Not analyzed yet'}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handleSaveProfile}
+                                    disabled={profileLoading}
+                                    className="btn btn-primary"
+                                >
+                                    {profileLoading ? 'Saving...' : 'Save Profile'}
+                                </button>
+                            </div>
                         )}
 
                         {/* Search Tab */}
@@ -453,44 +591,14 @@ const App = () => {
                             </div>
                         )}
 
-                        {/* Matches Tab */}
+                        {/* Matches Tab - Now Enhanced Company Database */}
                         {activeTab === 'matches' && (
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-center">
-                                    <h2 className="text-2xl font-bold text-gray-800">
-                                        Company Matches {profile.personalInfo?.firstName && `for ${profile.personalInfo.firstName}`}
-                                    </h2>
-                                    <div className="text-sm text-gray-600">
-                                        {companies.length} companies found • AI-ranked by fit
-                                    </div>
-                                </div>
-
-                                {companies.length === 0 ? (
-                                    <div className="text-center py-12">
-                                        <Brain className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                                        <h3 className="text-lg font-medium text-gray-600 mb-2">No companies found yet</h3>
-                                        <p className="text-gray-500 mb-4">Start an AI search to discover companies that match your profile</p>
-                                        <button
-                                            onClick={() => setActiveTab('search')}
-                                            className="btn btn-primary"
-                                        >
-                                            Start AI Search
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-6">
-                                        {companies.map((company) => (
-                                            <CompanyCard
-                                                key={company.id}
-                                                company={company}
-                                                onGenerateEmail={handleGenerateEmail}
-                                                onUpdateStatus={handleUpdateCompanyStatus}
-                                                userProfile={profile}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                            <CompaniesTable
+                                companies={companies}
+                                onGenerateEmail={handleGenerateEmail}
+                                onUpdateStatus={handleUpdateCompanyStatus}
+                                userProfile={profile}
+                            />
                         )}
 
                         {/* Emails Tab */}
