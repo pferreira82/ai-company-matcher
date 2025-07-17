@@ -14,10 +14,12 @@ import {
     Search,
     Download,
     Eye,
-    Send
+    Send,
+    Trash2,
+    MoreHorizontal
 } from 'lucide-react';
 
-const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, userProfile }) => {
+const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCompany, userProfile }) => {
     const [filteredCompanies, setFilteredCompanies] = useState(companies);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -25,6 +27,7 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, userProfil
     const [sortBy, setSortBy] = useState('aiMatchScore');
     const [sortOrder, setSortOrder] = useState('desc');
     const [selectedCompanies, setSelectedCompanies] = useState(new Set());
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
 
     useEffect(() => {
         let filtered = [...companies];
@@ -138,6 +141,86 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, userProfil
         setSelectedCompanies(new Set());
     };
 
+    const handleBulkDelete = () => {
+        if (!confirm(`Are you sure you want to delete ${selectedCompanies.size} selected companies? This action cannot be undone.`)) {
+            return;
+        }
+
+        selectedCompanies.forEach(companyId => {
+            onDeleteCompany(companyId);
+        });
+        setSelectedCompanies(new Set());
+    };
+
+    const handleDeleteSingle = (companyId) => {
+        setShowDeleteConfirm(companyId);
+    };
+
+    const confirmDelete = () => {
+        if (showDeleteConfirm) {
+            onDeleteCompany(showDeleteConfirm);
+            setShowDeleteConfirm(null);
+        }
+    };
+
+    const ActionDropdown = ({ company }) => {
+        const [showDropdown, setShowDropdown] = useState(false);
+
+        return (
+            <div className="relative">
+                <button
+                    onClick={() => setShowDropdown(!showDropdown)}
+                    className="p-1 rounded hover:bg-gray-100 transition-colors"
+                >
+                    <MoreHorizontal className="w-4 h-4 text-gray-400" />
+                </button>
+
+                {showDropdown && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                        <div className="py-1">
+                            <button
+                                onClick={() => {
+                                    onGenerateEmail(company);
+                                    setShowDropdown(false);
+                                }}
+                                className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                                <Mail className="w-4 h-4" />
+                                Generate Email
+                            </button>
+
+                            {company.website && (
+                                <a
+                                    href={company.website}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                    onClick={() => setShowDropdown(false)}
+                                >
+                                    <Globe className="w-4 h-4" />
+                                    Visit Website
+                                </a>
+                            )}
+
+                            <hr className="my-1" />
+
+                            <button
+                                onClick={() => {
+                                    handleDeleteSingle(company.id || company._id);
+                                    setShowDropdown(false);
+                                }}
+                                className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                Delete Company
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -158,7 +241,14 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, userProfil
                                 {selectedCompanies.size} selected
                             </span>
                             <select
-                                onChange={(e) => e.target.value && handleBulkStatusUpdate(e.target.value)}
+                                onChange={(e) => {
+                                    if (e.target.value === 'delete') {
+                                        handleBulkDelete();
+                                    } else if (e.target.value) {
+                                        handleBulkStatusUpdate(e.target.value);
+                                    }
+                                    e.target.value = '';
+                                }}
                                 className="text-sm border border-gray-300 rounded px-2 py-1"
                                 defaultValue=""
                             >
@@ -166,6 +256,7 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, userProfil
                                 <option value="contacted">Mark as Contacted</option>
                                 <option value="not-contacted">Mark as Not Contacted</option>
                                 <option value="rejected">Mark as Rejected</option>
+                                <option value="delete" className="text-red-600">Delete Selected</option>
                             </select>
                         </div>
                     )}
@@ -382,32 +473,31 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, userProfil
                                     </td>
 
                                     <td className="py-4 px-4">
-                                        {getStatusBadge(company.status || 'not-contacted')}
+                                        <select
+                                            value={company.status || 'not-contacted'}
+                                            onChange={(e) => onUpdateStatus(company.id || company._id, e.target.value)}
+                                            className="text-xs border border-gray-300 rounded px-2 py-1 bg-white"
+                                        >
+                                            <option value="not-contacted">Not Contacted</option>
+                                            <option value="contacted">Contacted</option>
+                                            <option value="responded">Responded</option>
+                                            <option value="interview">Interview</option>
+                                            <option value="rejected">Rejected</option>
+                                            <option value="hired">Hired</option>
+                                        </select>
                                     </td>
 
                                     <td className="py-4 px-4">
-                                        <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-2">
                                             <button
                                                 onClick={() => onGenerateEmail(company)}
                                                 disabled={!userProfile.personalInfo?.firstName || !userProfile.personalInfo?.email}
                                                 className="btn btn-primary text-xs px-3 py-1 flex items-center gap-1"
                                             >
                                                 <Mail className="w-3 h-3" />
-                                                Generate Email
+                                                Email
                                             </button>
-
-                                            <select
-                                                value={company.status || 'not-contacted'}
-                                                onChange={(e) => onUpdateStatus(company.id || company._id, e.target.value)}
-                                                className="text-xs border border-gray-300 rounded px-2 py-1"
-                                            >
-                                                <option value="not-contacted">Not Contacted</option>
-                                                <option value="contacted">Contacted</option>
-                                                <option value="responded">Responded</option>
-                                                <option value="interview">Interview</option>
-                                                <option value="rejected">Rejected</option>
-                                                <option value="hired">Hired</option>
-                                            </select>
+                                            <ActionDropdown company={company} />
                                         </div>
                                     </td>
                                 </tr>
@@ -459,6 +549,37 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, userProfil
                             <div className="font-semibold text-yellow-600">
                                 {filteredCompanies.filter(c => c.status && c.status !== 'not-contacted').length}
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg p-6 max-w-md w-full">
+                        <div className="flex items-center gap-3 mb-4">
+                            <Trash2 className="w-6 h-6 text-red-600" />
+                            <h3 className="text-lg font-semibold text-gray-900">Delete Company</h3>
+                        </div>
+
+                        <p className="text-gray-600 mb-6">
+                            Are you sure you want to delete this company? This action cannot be undone and will remove all associated data including emails and notes.
+                        </p>
+
+                        <div className="flex gap-3 justify-end">
+                            <button
+                                onClick={() => setShowDeleteConfirm(null)}
+                                className="btn btn-secondary"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                className="btn bg-red-600 hover:bg-red-700 text-white"
+                            >
+                                Delete Company
+                            </button>
                         </div>
                     </div>
                 </div>

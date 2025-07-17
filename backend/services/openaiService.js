@@ -20,10 +20,10 @@ try {
 }
 
 // Analyze user profile with AI
-async function analyzeUserProfile(resume, personalStatement) {
+async function analyzeUserProfile(resume, personalStatement, demoMode = false) {
     try {
-        if (!openaiClient) {
-            // Return mock analysis for development
+        if (demoMode || !openaiClient) {
+            // Return mock analysis for demo/development
             return {
                 strengths: [
                     'Strong technical skills',
@@ -133,11 +133,11 @@ async function analyzeUserProfile(resume, personalStatement) {
 }
 
 // Generate company matches based on profile
-async function findCompanyMatches(profile, maxResults = 50, nationwide = false) {
+async function findCompanyMatches(profile, maxResults = 1000, nationwide = false, demoMode = false) {
     try {
-        if (!openaiClient) {
-            // Return mock companies for development
-            return generateMockCompanies(maxResults, nationwide);
+        if (demoMode || !openaiClient) {
+            // Return expanded mock companies for demo/development
+            return generateMockCompanies(maxResults, nationwide, demoMode);
         }
 
         const location = nationwide ? 'nationwide' : 'Boston, MA and Providence, RI area';
@@ -176,6 +176,7 @@ async function findCompanyMatches(profile, maxResults = 50, nationwide = false) 
     ]
     
     Focus on real companies that exist and match the criteria. Include a mix of well-known and emerging companies.
+    Prioritize companies that are actively hiring and have good reputations.
     `;
 
         const response = await openaiClient.chat.completions.create({
@@ -190,7 +191,7 @@ async function findCompanyMatches(profile, maxResults = 50, nationwide = false) 
                     content: prompt
                 }
             ],
-            max_tokens: 3000,
+            max_tokens: 4000, // Increased for more companies
             temperature: 0.8,
         });
 
@@ -200,14 +201,14 @@ async function findCompanyMatches(profile, maxResults = 50, nationwide = false) 
 
     } catch (error) {
         logger.error('OpenAI company matching failed:', error);
-        return generateMockCompanies(maxResults, nationwide);
+        return generateMockCompanies(maxResults, nationwide, demoMode);
     }
 }
 
 // Evaluate work-life balance for a company
-async function evaluateWorkLifeBalance(companyData) {
+async function evaluateWorkLifeBalance(companyData, demoMode = false) {
     try {
-        if (!openaiClient) {
+        if (demoMode || !openaiClient) {
             // Return mock evaluation
             return {
                 score: Math.floor(Math.random() * 4) + 6, // 6-10 score
@@ -275,9 +276,9 @@ async function evaluateWorkLifeBalance(companyData) {
 }
 
 // Evaluate company-profile match
-async function evaluateCompanyMatch(profile, companyData) {
+async function evaluateCompanyMatch(profile, companyData, demoMode = false) {
     try {
-        if (!openaiClient) {
+        if (demoMode || !openaiClient) {
             // Return mock match evaluation
             return {
                 matchScore: Math.floor(Math.random() * 30) + 70, // 70-100 score
@@ -365,8 +366,9 @@ async function evaluateCompanyMatch(profile, companyData) {
     }
 }
 
-// Generate mock companies for development
-function generateMockCompanies(maxResults, nationwide) {
+// Generate comprehensive mock companies for development and demo
+function generateMockCompanies(maxResults, nationwide, demoMode = false) {
+    // Expanded company lists for better demo experience
     const bostonCompanies = [
         { name: 'HubSpot', location: 'Cambridge, MA', industry: 'technology', size: 'large' },
         { name: 'Wayfair', location: 'Boston, MA', industry: 'ecommerce', size: 'large' },
@@ -377,15 +379,30 @@ function generateMockCompanies(maxResults, nationwide) {
         { name: 'TripAdvisor', location: 'Needham, MA', industry: 'technology', size: 'large' },
         { name: 'Akamai', location: 'Cambridge, MA', industry: 'technology', size: 'large' },
         { name: 'Brightcove', location: 'Boston, MA', industry: 'technology', size: 'medium' },
-        { name: 'Endurance International', location: 'Burlington, MA', industry: 'technology', size: 'large' }
+        { name: 'Endurance International', location: 'Burlington, MA', industry: 'technology', size: 'large' },
+        { name: 'Constant Contact', location: 'Waltham, MA', industry: 'technology', size: 'medium' },
+        { name: 'SmartBear', location: 'Somerville, MA', industry: 'technology', size: 'medium' },
+        { name: 'DataRobot', location: 'Boston, MA', industry: 'technology', size: 'medium' },
+        { name: 'SimpliVity', location: 'Westborough, MA', industry: 'technology', size: 'medium' },
+        { name: 'Acquia', location: 'Boston, MA', industry: 'technology', size: 'medium' },
+        { name: 'ZipRecruiter Boston', location: 'Boston, MA', industry: 'technology', size: 'large' },
+        { name: 'Klaviyo', location: 'Boston, MA', industry: 'technology', size: 'medium' },
+        { name: 'PTC', location: 'Boston, MA', industry: 'technology', size: 'large' },
+        { name: 'Workato', location: 'Boston, MA', industry: 'technology', size: 'medium' },
+        { name: 'Recorded Future', location: 'Somerville, MA', industry: 'technology', size: 'medium' }
     ];
 
     const providenceCompanies = [
+        { name: 'CVS Health', location: 'Woonsocket, RI', industry: 'healthcare', size: 'large' },
+        { name: 'American Power Conversion', location: 'West Kingston, RI', industry: 'technology', size: 'large' },
+        { name: 'IGT', location: 'Providence, RI', industry: 'technology', size: 'large' },
+        { name: 'Citizens Bank', location: 'Providence, RI', industry: 'fintech', size: 'large' },
         { name: 'Textiles Inc', location: 'Providence, RI', industry: 'technology', size: 'small' },
         { name: 'Ocean State Tech', location: 'Providence, RI', industry: 'technology', size: 'medium' },
         { name: 'Rhode Island Software', location: 'Warwick, RI', industry: 'technology', size: 'small' },
         { name: 'Coastal Dynamics', location: 'Newport, RI', industry: 'technology', size: 'small' },
-        { name: 'Providence Digital', location: 'Providence, RI', industry: 'technology', size: 'medium' }
+        { name: 'Providence Digital', location: 'Providence, RI', industry: 'technology', size: 'medium' },
+        { name: 'Davey Tree Expert Company', location: 'Kent, RI', industry: 'technology', size: 'medium' }
     ];
 
     const nationwideCompanies = [
@@ -398,7 +415,56 @@ function generateMockCompanies(maxResults, nationwide) {
         { name: 'Zoom', location: 'San Jose, CA', industry: 'technology', size: 'large' },
         { name: 'Slack', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
         { name: 'Atlassian', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
-        { name: 'DocuSign', location: 'San Francisco, CA', industry: 'technology', size: 'large' }
+        { name: 'DocuSign', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Snowflake', location: 'Bozeman, MT', industry: 'technology', size: 'large' },
+        { name: 'Databricks', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Coinbase', location: 'San Francisco, CA', industry: 'fintech', size: 'large' },
+        { name: 'Square', location: 'San Francisco, CA', industry: 'fintech', size: 'large' },
+        { name: 'Twilio', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Okta', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'CrowdStrike', location: 'Sunnyvale, CA', industry: 'technology', size: 'large' },
+        { name: 'Palo Alto Networks', location: 'Santa Clara, CA', industry: 'technology', size: 'large' },
+        { name: 'ServiceNow', location: 'Santa Clara, CA', industry: 'technology', size: 'large' },
+        { name: 'Workday', location: 'Pleasanton, CA', industry: 'technology', size: 'large' },
+        { name: 'Salesforce', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Adobe', location: 'San Jose, CA', industry: 'technology', size: 'large' },
+        { name: 'Intuit', location: 'Mountain View, CA', industry: 'technology', size: 'large' },
+        { name: 'PayPal', location: 'San Jose, CA', industry: 'fintech', size: 'large' },
+        { name: 'eBay', location: 'San Jose, CA', industry: 'ecommerce', size: 'large' },
+        { name: 'Uber', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Lyft', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Airbnb', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'DoorDash', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        { name: 'Instacart', location: 'San Francisco, CA', industry: 'technology', size: 'large' },
+        // Austin companies
+        { name: 'Dell Technologies', location: 'Round Rock, TX', industry: 'technology', size: 'large' },
+        { name: 'IBM Austin', location: 'Austin, TX', industry: 'technology', size: 'large' },
+        { name: 'Indeed', location: 'Austin, TX', industry: 'technology', size: 'large' },
+        { name: 'Bumble', location: 'Austin, TX', industry: 'technology', size: 'medium' },
+        { name: 'HomeAway', location: 'Austin, TX', industry: 'technology', size: 'medium' },
+        // Seattle companies
+        { name: 'Expedia', location: 'Seattle, WA', industry: 'technology', size: 'large' },
+        { name: 'Redfin', location: 'Seattle, WA', industry: 'technology', size: 'medium' },
+        { name: 'Zillow', location: 'Seattle, WA', industry: 'technology', size: 'large' },
+        // New York companies
+        { name: 'MongoDB', location: 'New York, NY', industry: 'technology', size: 'large' },
+        { name: 'Datadog', location: 'New York, NY', industry: 'technology', size: 'large' },
+        { name: 'Etsy', location: 'Brooklyn, NY', industry: 'ecommerce', size: 'medium' },
+        { name: 'Spotify', location: 'New York, NY', industry: 'technology', size: 'large' },
+        { name: 'WeWork', location: 'New York, NY', industry: 'technology', size: 'large' },
+        // Chicago companies
+        { name: 'Groupon', location: 'Chicago, IL', industry: 'technology', size: 'medium' },
+        { name: 'SpotHero', location: 'Chicago, IL', industry: 'technology', size: 'small' },
+        { name: 'Orbitz', location: 'Chicago, IL', industry: 'technology', size: 'medium' },
+        // Additional startups and medium companies
+        { name: 'Figma', location: 'San Francisco, CA', industry: 'technology', size: 'medium' },
+        { name: 'Notion', location: 'San Francisco, CA', industry: 'technology', size: 'small' },
+        { name: 'Canva', location: 'Sydney, AU', industry: 'technology', size: 'medium' },
+        { name: 'Robinhood', location: 'Menlo Park, CA', industry: 'fintech', size: 'medium' },
+        { name: 'Plaid', location: 'San Francisco, CA', industry: 'fintech', size: 'medium' },
+        { name: 'Brex', location: 'San Francisco, CA', industry: 'fintech', size: 'medium' },
+        { name: 'Chime', location: 'San Francisco, CA', industry: 'fintech', size: 'medium' },
+        { name: 'Affirm', location: 'San Francisco, CA', industry: 'fintech', size: 'medium' }
     ];
 
     let companies = [...bostonCompanies, ...providenceCompanies];
@@ -418,7 +484,7 @@ function generateMockCompanies(maxResults, nationwide) {
                 company.size === 'medium' ? Math.floor(Math.random() * 800) + 200 :
                     Math.floor(Math.random() * 5000) + 1000,
         description: `${company.name} is a ${company.size} ${company.industry} company focused on innovation and growth.`,
-        website: `https://${company.name.toLowerCase().replace(/\s+/g, '')}.com`,
+        website: `https://${company.name.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '')}.com`,
         reasons: [
             'Strong technical team',
             'Good company culture',

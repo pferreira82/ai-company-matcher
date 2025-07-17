@@ -65,8 +65,9 @@ class APIService {
 // Apollo.io API for company data and contacts
 const searchApollo = async (params) => {
     try {
-        if (!process.env.APOLLO_API_KEY) {
-            logger.warn('Apollo.io API key not configured, returning mock data');
+        // Return demo data if in demo mode
+        if (params.demoMode || !process.env.APOLLO_API_KEY) {
+            logger.info('Apollo.io using demo data mode');
             return generateMockApolloData(params);
         }
 
@@ -164,8 +165,9 @@ const searchApollo = async (params) => {
 // Hunter.io API for additional email verification
 const searchHunter = async (params) => {
     try {
-        if (!process.env.HUNTER_API_KEY) {
-            logger.warn('Hunter.io API key not configured, returning mock data');
+        // Return demo data if in demo mode
+        if (params.demoMode || !process.env.HUNTER_API_KEY) {
+            logger.info('Hunter.io using demo data mode');
             return generateMockHunterData(params);
         }
 
@@ -210,14 +212,14 @@ const searchHunter = async (params) => {
     }
 };
 
-// Generate mock Apollo data for development
+// Generate enhanced mock Apollo data for development and demo
 function generateMockApolloData(params) {
     if (!params.name) return [];
 
-    const mockContacts = [
+    // Generate varied mock contacts for better demo experience
+    const mockContactTemplates = [
         {
             name: 'Sarah Johnson',
-            email: 'sarah.johnson@company.com',
             title: 'HR Director',
             confidence: 90,
             verified: true,
@@ -225,13 +227,43 @@ function generateMockApolloData(params) {
         },
         {
             name: 'Mike Chen',
-            email: 'mike.chen@company.com',
             title: 'Talent Acquisition Manager',
             confidence: 85,
             verified: false,
             source: 'apollo'
+        },
+        {
+            name: 'Jennifer Martinez',
+            title: 'People Operations Lead',
+            confidence: 88,
+            verified: true,
+            source: 'apollo'
+        },
+        {
+            name: 'David Williams',
+            title: 'Senior Recruiter',
+            confidence: 82,
+            verified: false,
+            source: 'apollo'
+        },
+        {
+            name: 'Emily Davis',
+            title: 'Head of People',
+            confidence: 95,
+            verified: true,
+            source: 'apollo'
         }
     ];
+
+    // Randomly select 1-3 contacts
+    const numContacts = Math.floor(Math.random() * 3) + 1;
+    const selectedContacts = mockContactTemplates
+        .sort(() => 0.5 - Math.random())
+        .slice(0, numContacts)
+        .map(contact => ({
+            ...contact,
+            email: `${contact.name.toLowerCase().replace(/\s+/g, '.')}@${params.name.toLowerCase().replace(/\s+/g, '')}.com`
+        }));
 
     return [{
         name: params.name,
@@ -240,32 +272,57 @@ function generateMockApolloData(params) {
         location: params.location || 'Boston, MA',
         industry: 'technology',
         size: 'medium',
-        employeeCount: 500,
-        description: `${params.name} is a growing technology company.`,
-        hrContacts: mockContacts,
+        employeeCount: Math.floor(Math.random() * 800) + 200,
+        description: `${params.name} is a growing technology company focused on innovation and customer success.`,
+        hrContacts: selectedContacts,
         apiSources: [{
             provider: 'apollo',
-            data: { apolloId: 'mock-id' },
+            data: { apolloId: 'demo-' + Date.now() },
             fetchedAt: new Date()
         }]
     }];
 }
 
-// Generate mock Hunter data for development
+// Generate enhanced mock Hunter data for development and demo
 function generateMockHunterData(params) {
     if (!params.domain) return [];
 
+    const mockHunterContacts = [
+        {
+            name: 'Jennifer Smith',
+            title: 'Head of People',
+            confidence: 95,
+            verified: true,
+            source: 'hunter'
+        },
+        {
+            name: 'Robert Anderson',
+            title: 'Talent Partner',
+            confidence: 87,
+            verified: false,
+            source: 'hunter'
+        },
+        {
+            name: 'Lisa Thompson',
+            title: 'HR Business Partner',
+            confidence: 92,
+            verified: true,
+            source: 'hunter'
+        }
+    ];
+
+    // Randomly select 1-2 contacts
+    const numContacts = Math.floor(Math.random() * 2) + 1;
+    const selectedContacts = mockHunterContacts
+        .sort(() => 0.5 - Math.random())
+        .slice(0, numContacts)
+        .map(contact => ({
+            ...contact,
+            email: `${contact.name.toLowerCase().replace(/\s+/g, '.')}@${params.domain}`
+        }));
+
     return [{
-        hrContacts: [
-            {
-                name: 'Jennifer Smith',
-                email: 'jennifer.smith@' + params.domain,
-                title: 'Head of People',
-                confidence: 95,
-                verified: true,
-                source: 'hunter'
-            }
-        ]
+        hrContacts: selectedContacts
     }];
 }
 

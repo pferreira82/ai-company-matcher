@@ -1,23 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { User, Search, Database, Mail, Settings, Brain, Heart, MapPin, Bug, BarChart3 } from 'lucide-react';
+import { User, Search, Database, Mail, Settings, Brain, Heart, MapPin, Bug, BarChart3, AlertCircle, CheckCircle, Clock, Eye, EyeOff, TestTube } from 'lucide-react';
 
 // Components
 import CompanyCard from './components/CompanyCard';
 import EmailModal from './components/EmailModal';
 import RealTimeStatsDashboard from './components/RealTimeStatsDashboard';
-import CompaniesTable from './components/CompaniesTable'; // New enhanced table component
+import CompaniesTable from './components/CompaniesTable';
 
 // Hooks
 import { useProfile } from './hooks/useProfile';
 import { useSearch } from './hooks/useSearch';
-import { useAPI } from './hooks/useAPI';
 
 // Services
 import { companiesAPI, emailAPI, configAPI } from './services/api';
 
 const App = () => {
     const [activeTab, setActiveTab] = useState('profile');
-    const [companies, setCompanies] = useState([]); // Initialize as empty array
+    const [companies, setCompanies] = useState([]);
     const [emailModal, setEmailModal] = useState({ isOpen: false, company: null, template: null });
     const [apiKeys, setApiKeys] = useState({
         openai: '',
@@ -27,36 +26,277 @@ const App = () => {
         crunchbase: ''
     });
 
-    // API Logging state
-    const [apiLoggingEnabled, setApiLoggingEnabled] = useState(false);
-    const [apiStats, setApiStats] = useState(null);
+    // API monitoring state
+    const [apiLoading, setApiLoading] = useState(false);
+    const [apiStatus, setApiStatus] = useState({
+        openai: { connected: false, usage: null, limit: null, error: null },
+        apollo: { connected: false, usage: null, limit: null, error: null },
+        hunter: { connected: false, usage: null, limit: null, error: null }
+    });
+    const [showApiKeys, setShowApiKeys] = useState({
+        openai: false,
+        apollo: false,
+        hunter: false
+    });
+    const [notifications, setNotifications] = useState([]);
+
+    // Demo mode state
+    const [demoMode, setDemoMode] = useState(false);
 
     // Custom hooks
     const { profile, loading: profileLoading, updateProfile, updatePreferences, saveProfile } = useProfile();
     const { searchStatus, startSearch, pauseSearch } = useSearch();
-    const { loading: apiLoading, execute } = useAPI();
 
-    // Load companies on mount and when search completes
+    // Load saved settings on mount
     useEffect(() => {
-        if (searchStatus.completed) {
-            loadCompanies();
-        }
-    }, [searchStatus.completed]);
-
-    useEffect(() => {
-        loadCompanies();
+        loadSavedApiKeys();
+        loadDemoMode();
     }, []);
 
+    // Load saved demo mode setting
+    const loadDemoMode = () => {
+        const savedDemoMode = localStorage.getItem('ai-company-matcher-demo-mode');
+        if (savedDemoMode === 'true') {
+            setDemoMode(true);
+        }
+    };
+
+    // Save demo mode setting
+    const toggleDemoMode = () => {
+        const newDemoMode = !demoMode;
+        setDemoMode(newDemoMode);
+        localStorage.setItem('ai-company-matcher-demo-mode', newDemoMode.toString());
+
+        if (newDemoMode) {
+            addNotification('Demo mode enabled - using sample data', 'info');
+        } else {
+            addNotification('Demo mode disabled - using production APIs', 'info');
+        }
+    };
+
+    // Enhanced execute function with API monitoring
+    const execute = async (apiCall, apiType = 'unknown') => {
+        try {
+            setApiLoading(true);
+            const response = await apiCall();
+
+            // Track API usage if headers contain usage info
+            if (response.headers) {
+                updateApiUsage(apiType, response.headers);
+            }
+
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error(`API Error (${apiType}):`, error);
+
+            // Check for rate limit errors
+            if (error.response?.status === 429) {
+                addNotification(`${apiType} API rate limit reached!`, 'error');
+                updateApiStatus(apiType, { rateLimited: true });
+            }
+
+            return {
+                success: false,
+                error: error.response?.data?.message || error.message
+            };
+        } finally {
+            setApiLoading(false);
+        }
+    };
+
+    // Load saved API keys from localStorage
+    const loadSavedApiKeys = () => {
+        try {
+            const saved = localStorage.getItem('ai-company-matcher-api-keys');
+            if (saved) {
+                const parsedKeys = JSON.parse(saved);
+                setApiKeys(parsedKeys);
+                console.log('✅ Loaded saved API keys');
+
+                // Test connections for saved keys
+                Object.entries(parsedKeys).forEach(([key, value]) => {
+                    if (value && value.trim()) {
+                        testApiConnection(key, value);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load saved API keys:', error);
+        }
+    };
+
+    // Enhanced API key saving
+    const handleSaveApiKeys = async () => {
+        try {
+            setApiLoading(true);
+
+            // Save to localStorage first
+            localStorage.setItem('ai-company-matcher-api-keys', JSON.stringify(apiKeys));
+
+            // Send to backend
+            const result = await execute(() => configAPI.saveApiKeys(apiKeys), 'config');
+
+            if (result.success) {
+                addNotification('API keys saved successfully!', 'success');
+
+                // Test all connections
+                Object.entries(apiKeys).forEach(([key, value]) => {
+                    if (value && value.trim()) {
+                        testApiConnection(key, value);
+                    }
+                });
+            } else {
+                addNotification('Failed to save API keys: ' + result.error, 'error');
+            }
+        } catch (error) {
+            console.error('Error saving API keys:', error);
+            addNotification('Failed to save API keys', 'error');
+        } finally {
+            setApiLoading(false);
+        }
+    };
+
+    // Enhanced API connection testing with error clearing
+    const testApiConnection = async (apiName, apiKey) => {
+        try {
+            // Clear previous status first
+            setApiStatus(prev => ({
+                ...prev,
+                [apiName]: {
+                    connected: false,
+                    usage: null,
+                    limit: null,
+                    error: null,
+                    testing: true
+                }
+            }));
+
+            const result = await execute(() => configAPI.testConnection(apiName, apiKey), apiName);
+
+            if (result.success) {
+                setApiStatus(prev => ({
+                    ...prev,
+                    [apiName]: {
+                        connected: true,
+                        usage: result.data.usage || null,
+                        limit: result.data.limit || null,
+                        message: result.data.message,
+                        error: null,
+                        testing: false
+                    }
+                }));
+                console.log(`✅ ${apiName} connected successfully`);
+            } else {
+                setApiStatus(prev => ({
+                    ...prev,
+                    [apiName]: {
+                        connected: false,
+                        error: result.error,
+                        testing: false
+                    }
+                }));
+                console.error(`❌ ${apiName} connection failed:`, result.error);
+            }
+        } catch (error) {
+            setApiStatus(prev => ({
+                ...prev,
+                [apiName]: {
+                    connected: false,
+                    error: error.message,
+                    testing: false
+                }
+            }));
+            console.error(`Error testing ${apiName}:`, error);
+        }
+    };
+
+    // Test all API connections
+    const testAllConnections = () => {
+        // Clear all statuses first
+        setApiStatus({
+            openai: { connected: false, usage: null, limit: null, error: null, testing: true },
+            apollo: { connected: false, usage: null, limit: null, error: null, testing: true },
+            hunter: { connected: false, usage: null, limit: null, error: null, testing: true }
+        });
+
+        // Test each connection
+        Object.entries(apiKeys).forEach(([key, value]) => {
+            if (value && value.trim()) {
+                testApiConnection(key, value);
+            } else {
+                setApiStatus(prev => ({
+                    ...prev,
+                    [key]: {
+                        connected: false,
+                        error: 'API key not provided',
+                        testing: false
+                    }
+                }));
+            }
+        });
+    };
+
+    // Update API usage tracking
+    const updateApiUsage = (apiType, headers) => {
+        const usage = {
+            openai: headers['x-ratelimit-remaining-tokens'],
+            apollo: headers['x-credits-remaining'],
+            hunter: headers['x-ratelimit-remaining']
+        };
+
+        if (usage[apiType]) {
+            setApiStatus(prev => ({
+                ...prev,
+                [apiType]: {
+                    ...prev[apiType],
+                    usage: usage[apiType]
+                }
+            }));
+
+            // Check if approaching limits
+            const remaining = parseInt(usage[apiType]);
+            if (remaining < 10) {
+                addNotification(`${apiType} API usage low: ${remaining} calls remaining`, 'warning');
+            }
+        }
+    };
+
+    // Update API status
+    const updateApiStatus = (apiType, status) => {
+        setApiStatus(prev => ({
+            ...prev,
+            [apiType]: {
+                ...prev[apiType],
+                ...status
+            }
+        }));
+    };
+
+    // Add notification
+    const addNotification = (message, type = 'info') => {
+        const notification = {
+            id: Date.now(),
+            message,
+            type,
+            timestamp: new Date().toLocaleTimeString()
+        };
+
+        setNotifications(prev => [notification, ...prev.slice(0, 4)]); // Keep last 5
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            setNotifications(prev => prev.filter(n => n.id !== notification.id));
+        }, 5000);
+    };
+
+    // Load companies
     const loadCompanies = async () => {
         console.log('🔍 Loading companies...');
         try {
-            const result = await execute(() => companiesAPI.getMatches());
+            const result = await execute(() => companiesAPI.getMatches(), 'companies');
             console.log('📦 Raw API result:', result);
-            console.log('📦 Result success:', result.success);
-            console.log('📦 Result data:', result.data);
 
             if (result.success && result.data) {
-                // Handle different response structures
                 if (Array.isArray(result.data)) {
                     console.log('✅ Setting companies directly (array):', result.data.length, 'companies');
                     setCompanies(result.data);
@@ -65,12 +305,10 @@ const App = () => {
                     setCompanies(result.data.data);
                 } else {
                     console.warn('⚠️ Unexpected data structure:', result.data);
-                    console.log('📊 Data keys:', Object.keys(result.data));
                     setCompanies([]);
                 }
             } else {
-                console.warn('⚠️ API call unsuccessful or no data');
-                console.log('❌ Result:', result);
+                console.warn('⚠️ API call unsuccessful:', result);
                 setCompanies([]);
             }
         } catch (error) {
@@ -79,93 +317,124 @@ const App = () => {
         }
     };
 
+    // Delete company
+    const handleDeleteCompany = async (companyId) => {
+        if (!confirm('Are you sure you want to delete this company? This action cannot be undone.')) {
+            return;
+        }
+
+        const result = await execute(() => companiesAPI.deleteCompany(companyId), 'companies');
+        if (result.success) {
+            setCompanies(prev => prev.filter(c => (c.id || c._id) !== companyId));
+            addNotification('Company deleted successfully', 'success');
+        } else {
+            addNotification('Failed to delete company: ' + result.error, 'error');
+        }
+    };
+
     const handleStartSearch = async () => {
+        // In demo mode, allow search without API keys
+        if (!demoMode && (!apiKeys.openai || !apiKeys.apollo)) {
+            addNotification('Please configure OpenAI and Apollo API keys first, or enable demo mode', 'error');
+            setActiveTab('config');
+            return;
+        }
+
         // Validate required fields
         if (!profile.resume || !profile.personalStatement) {
-            alert('Please complete your resume and personal statement first');
+            addNotification('Please complete your resume and personal statement first', 'error');
             setActiveTab('profile');
             return;
         }
 
         if (!profile.personalInfo?.firstName || !profile.personalInfo?.email) {
-            alert('Please add your name and email in the personal information section');
+            addNotification('Please add your name and email in the personal information section', 'error');
             setActiveTab('profile');
             return;
         }
 
         // Validate preferences
         if (!profile.preferences?.companySizes || profile.preferences.companySizes.length === 0) {
-            alert('Please select at least one company size preference');
+            addNotification('Please select at least one company size preference', 'error');
             setActiveTab('profile');
             return;
         }
 
         if (!profile.preferences?.industries || profile.preferences.industries.length === 0) {
-            alert('Please select at least one industry preference');
+            addNotification('Please select at least one industry preference', 'error');
             setActiveTab('profile');
             return;
+        }
+
+        if (demoMode) {
+            addNotification('Starting demo search with sample data...', 'info');
+        } else {
+            addNotification('Starting AI search...', 'info');
         }
 
         const result = await startSearch({
             profile,
-            location: 'boston-providence', // Always start with Boston/Providence
-            maxResults: 50
+            location: 'boston-providence',
+            maxResults: 1000,
+            demoMode: demoMode // Pass demo mode to search
         });
 
         if (result.success) {
             setActiveTab('search');
+            addNotification('Search started successfully!', 'success');
+        } else {
+            addNotification('Failed to start search: ' + result.error, 'error');
         }
     };
 
     const handleGenerateEmail = async (company) => {
-        // Check if personal info is complete
         if (!profile.personalInfo?.firstName || !profile.personalInfo?.email) {
-            alert('Please complete your personal information (name and email) before generating emails');
+            addNotification('Please complete your personal information before generating emails', 'error');
             setActiveTab('profile');
             return;
         }
 
-        const result = await execute(() => emailAPI.generate(company.id, profile));
+        const result = await execute(() => emailAPI.generate(company.id || company._id, profile), 'openai');
         if (result.success) {
             setEmailModal({
                 isOpen: true,
                 company,
-                template: result.data.data
+                template: result.data
             });
+            addNotification(`Email generated for ${company.name}`, 'success');
+        } else {
+            addNotification('Failed to generate email: ' + result.error, 'error');
         }
     };
 
     const handleUpdateCompanyStatus = async (companyId, status) => {
-        const result = await execute(() => companiesAPI.updateStatus(companyId, status));
+        const result = await execute(() => companiesAPI.updateStatus(companyId, status), 'companies');
         if (result.success) {
             setCompanies(prev =>
-                prev.map(c => c.id === companyId ? { ...c, status } : c)
+                prev.map(c => (c.id === companyId || c._id === companyId) ? { ...c, status } : c)
             );
-        }
-    };
-
-    const handleSaveApiKeys = async () => {
-        const result = await execute(() => configAPI.saveApiKeys(apiKeys));
-        if (result.success) {
-            alert('API keys saved successfully!');
+            addNotification('Company status updated', 'success');
+        } else {
+            addNotification('Failed to update status: ' + result.error, 'error');
         }
     };
 
     const handleSaveProfile = async () => {
-        // Validate required fields
         if (!profile.personalInfo?.firstName || !profile.personalInfo?.email) {
-            alert('Please provide your name and email address');
+            addNotification('Please provide your name and email address', 'error');
             return;
         }
 
         if (!profile.resume || !profile.personalStatement) {
-            alert('Please complete your resume and personal statement');
+            addNotification('Please complete your resume and personal statement', 'error');
             return;
         }
 
         const result = await saveProfile(profile);
         if (result.success) {
-            alert('Profile saved successfully!');
+            addNotification('Profile saved successfully!', 'success');
+        } else {
+            addNotification('Failed to save profile: ' + result.error, 'error');
         }
     };
 
@@ -218,10 +487,54 @@ const App = () => {
         return { completed, total, percentage: Math.round((completed / total) * 100) };
     };
 
+    const getApiStatusIcon = (status) => {
+        if (status.testing) return <Clock className="w-4 h-4 text-blue-600 animate-spin" />;
+        if (status.connected) return <CheckCircle className="w-4 h-4 text-green-600" />;
+        if (status.rateLimited) return <Clock className="w-4 h-4 text-yellow-600" />;
+        return <AlertCircle className="w-4 h-4 text-red-600" />;
+    };
+
     const profileStats = getProfileCompleteness();
+
+    useEffect(() => {
+        loadCompanies();
+    }, []);
+
+    useEffect(() => {
+        if (searchStatus.completed) {
+            loadCompanies();
+        }
+    }, [searchStatus.completed]);
 
     return (
         <div className="min-h-screen bg-gradient-primary">
+            {/* Notifications */}
+            {notifications.length > 0 && (
+                <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+                    {notifications.map(notification => (
+                        <div
+                            key={notification.id}
+                            className={`p-4 rounded-lg shadow-lg border-l-4 ${
+                                notification.type === 'success' ? 'bg-green-50 border-green-500' :
+                                    notification.type === 'error' ? 'bg-red-50 border-red-500' :
+                                        notification.type === 'warning' ? 'bg-yellow-50 border-yellow-500' :
+                                            'bg-blue-50 border-blue-500'
+                            }`}
+                        >
+                            <div className="flex items-start gap-2">
+                                {notification.type === 'success' && <CheckCircle className="w-4 h-4 text-green-600 mt-0.5" />}
+                                {notification.type === 'error' && <AlertCircle className="w-4 h-4 text-red-600 mt-0.5" />}
+                                {notification.type === 'warning' && <Clock className="w-4 h-4 text-yellow-600 mt-0.5" />}
+                                <div>
+                                    <p className="text-sm font-medium">{notification.message}</p>
+                                    <p className="text-xs text-gray-500 mt-1">{notification.timestamp}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             <div className="container mx-auto px-4 py-6 max-w-7xl">
                 {/* Header */}
                 <div className="card p-6 mb-6">
@@ -240,8 +553,39 @@ const App = () => {
                             </div>
                         </div>
 
-                        {/* Right side controls */}
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-6">
+                            {/* Demo Mode Toggle */}
+                            <div className="flex items-center gap-3">
+                                <div className="text-right">
+                                    <div className="text-sm text-gray-600 mb-1">Demo Mode</div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={toggleDemoMode}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                                demoMode ? 'bg-blue-600' : 'bg-gray-200'
+                                            }`}
+                                        >
+                                            <span
+                                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                                    demoMode ? 'translate-x-6' : 'translate-x-1'
+                                                }`}
+                                            />
+                                        </button>
+                                        <TestTube className={`w-4 h-4 ${demoMode ? 'text-blue-600' : 'text-gray-400'}`} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* API Status Summary */}
+                            <div className="text-right">
+                                <div className="text-sm text-gray-600 mb-1">API Status</div>
+                                <div className="flex items-center gap-2">
+                                    {getApiStatusIcon(apiStatus.openai)}
+                                    {getApiStatusIcon(apiStatus.apollo)}
+                                    {getApiStatusIcon(apiStatus.hunter)}
+                                </div>
+                            </div>
+
                             {/* Profile Completeness */}
                             <div className="text-right">
                                 <div className="text-sm text-gray-600 mb-1">Profile Completeness</div>
@@ -253,15 +597,23 @@ const App = () => {
                                         />
                                     </div>
                                     <span className="text-sm font-medium text-gray-700">
-                    {profileStats.percentage}%
-                  </span>
+                                        {profileStats.percentage}%
+                                    </span>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <p className="text-gray-600 mt-2">
-                        Find companies that match your profile in Boston, MA → Providence, RI → Nationwide
-                    </p>
+                    <div className="flex items-center justify-between mt-2">
+                        <p className="text-gray-600">
+                            Find companies that match your profile • {companies.length} companies found
+                        </p>
+                        {demoMode && (
+                            <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                                <TestTube className="w-4 h-4" />
+                                <span className="text-sm font-medium">Demo Mode Active</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Navigation */}
@@ -294,6 +646,9 @@ const App = () => {
                                         <span className="bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full">
                                             {companies.length}
                                         </span>
+                                    )}
+                                    {tab.id === 'config' && !demoMode && (!apiKeys.openai || !apiKeys.apollo) && (
+                                        <AlertCircle className="w-4 h-4 text-red-500" />
                                     )}
                                 </button>
                             );
@@ -527,7 +882,7 @@ const App = () => {
                                         <ul className="space-y-2">
                                             <li>• <strong>Phase 1:</strong> Boston, MA area companies (primary focus)</li>
                                             <li>• <strong>Phase 2:</strong> Providence, RI area companies</li>
-                                            <li>• <strong>Phase 3:</strong> Expand nationwide if &lt;100 found</li>
+                                            <li>• <strong>Phase 3:</strong> Expand nationwide for 1000+ companies</li>
                                         </ul>
                                         <ul className="space-y-2">
                                             <li>• Filter by your selected company sizes</li>
@@ -537,6 +892,39 @@ const App = () => {
                                         </ul>
                                     </div>
                                 </div>
+
+                                {/* Demo Mode Info */}
+                                {demoMode && (
+                                    <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
+                                        <div className="flex items-center gap-2 text-green-800 mb-2">
+                                            <TestTube className="w-5 h-5" />
+                                            <span className="font-medium">Demo Mode Active</span>
+                                        </div>
+                                        <p className="text-green-700 text-sm">
+                                            Using sample data for demonstration. Turn off demo mode to use real API connections.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* API Keys Warning */}
+                                {!demoMode && (!apiKeys.openai || !apiKeys.apollo) && (
+                                    <div className="bg-red-50 border border-red-200 p-4 rounded-lg">
+                                        <div className="flex items-center gap-2 text-red-800 mb-2">
+                                            <AlertCircle className="w-5 h-5" />
+                                            <span className="font-medium">API Keys Required</span>
+                                        </div>
+                                        <p className="text-red-700 text-sm">
+                                            Please configure your API keys in the API Config tab before starting a search.
+                                            Without proper API keys, you'll only find limited results.
+                                        </p>
+                                        <button
+                                            onClick={() => setActiveTab('config')}
+                                            className="mt-3 btn btn-primary text-sm"
+                                        >
+                                            Configure API Keys
+                                        </button>
+                                    </div>
+                                )}
 
                                 {!profile.personalInfo?.firstName && (
                                     <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
@@ -576,10 +964,8 @@ const App = () => {
                                     )}
                                 </div>
 
-                                {/* Basic Progress Bar */}
                                 {renderProgressBar()}
 
-                                {/* Real-Time Stats Dashboard */}
                                 {(searchStatus.isRunning || searchStatus.liveStats) && (
                                     <div className="mt-8">
                                         <RealTimeStatsDashboard
@@ -591,12 +977,13 @@ const App = () => {
                             </div>
                         )}
 
-                        {/* Matches Tab - Now Enhanced Company Database */}
+                        {/* Matches Tab */}
                         {activeTab === 'matches' && (
                             <CompaniesTable
                                 companies={companies}
                                 onGenerateEmail={handleGenerateEmail}
                                 onUpdateStatus={handleUpdateCompanyStatus}
+                                onDeleteCompany={handleDeleteCompany}
                                 userProfile={profile}
                             />
                         )}
@@ -672,71 +1059,208 @@ const App = () => {
                             </div>
                         )}
 
-                        {/* Config Tab */}
+                        {/* Enhanced Config Tab */}
                         {activeTab === 'config' && (
                             <div className="space-y-6">
                                 <h2 className="text-2xl font-bold text-gray-800">API Configuration</h2>
 
-                                <div className="bg-red-50 p-6 rounded-lg">
-                                    <h3 className="text-lg font-semibold text-red-800 mb-4">Required API Keys</h3>
-                                    <div className="space-y-4">
-                                        <div className="bg-white p-4 rounded border">
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                OpenAI API Key (Required) *
-                                            </label>
+                                <div className="bg-blue-50 p-6 rounded-lg">
+                                    <h3 className="text-lg font-semibold text-blue-800 mb-4">Why API Keys Are Required</h3>
+                                    <p className="text-blue-700 text-sm">
+                                        To find hundreds of companies with verified HR contacts, this tool needs access to:
+                                    </p>
+                                    <ul className="text-blue-600 text-sm mt-2 space-y-1">
+                                        <li>• <strong>OpenAI</strong> - For AI analysis and email generation</li>
+                                        <li>• <strong>Apollo.io</strong> - For company data and contact information</li>
+                                        <li>• <strong>Hunter.io</strong> - For additional email verification</li>
+                                    </ul>
+                                    <p className="text-blue-700 text-sm mt-3">
+                                        Without proper API keys, you can use demo mode to explore the interface with sample data.
+                                    </p>
+                                </div>
+
+                                <div className="bg-white p-6 rounded-lg border">
+                                    <h3 className="text-lg font-semibold text-gray-800 mb-4">API Configuration</h3>
+                                    <div className="space-y-6">
+                                        {/* OpenAI */}
+                                        <div className="p-4 border rounded-lg">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <label className="text-sm font-medium text-gray-700">
+                                                    OpenAI API Key (Required) *
+                                                </label>
+                                                <div className="flex items-center gap-2">
+                                                    {getApiStatusIcon(apiStatus.openai)}
+                                                    <button
+                                                        onClick={() => setShowApiKeys(prev => ({...prev, openai: !prev.openai}))}
+                                                        className="text-xs text-gray-500 hover:text-gray-700"
+                                                    >
+                                                        {showApiKeys.openai ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                    </button>
+                                                </div>
+                                            </div>
                                             <input
-                                                type="password"
+                                                type={showApiKeys.openai ? "text" : "password"}
                                                 value={apiKeys.openai}
                                                 onChange={(e) => setApiKeys(prev => ({ ...prev, openai: e.target.value }))}
                                                 className="input"
                                                 placeholder="sk-..."
                                             />
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Get from: https://platform.openai.com/api-keys
-                                            </p>
+                                            <div className="flex justify-between items-center mt-2">
+                                                <p className="text-xs text-gray-500">
+                                                    Get from: https://platform.openai.com/api-keys
+                                                </p>
+                                                {apiStatus.openai.connected && (
+                                                    <span className="text-xs text-green-600">
+                                                        {apiStatus.openai.message}
+                                                    </span>
+                                                )}
+                                                {apiStatus.openai.error && (
+                                                    <span className="text-xs text-red-600">
+                                                        {apiStatus.openai.error}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
 
-                                        <div className="bg-white p-4 rounded border">
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Apollo.io API Key (Company data)
-                                            </label>
+                                        {/* Apollo */}
+                                        <div className="p-4 border rounded-lg">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <label className="text-sm font-medium text-gray-700">
+                                                    Apollo.io API Key (Company Data) *
+                                                </label>
+                                                <div className="flex items-center gap-2">
+                                                    {getApiStatusIcon(apiStatus.apollo)}
+                                                    <button
+                                                        onClick={() => setShowApiKeys(prev => ({...prev, apollo: !prev.apollo}))}
+                                                        className="text-xs text-gray-500 hover:text-gray-700"
+                                                    >
+                                                        {showApiKeys.apollo ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                    </button>
+                                                </div>
+                                            </div>
                                             <input
-                                                type="password"
+                                                type={showApiKeys.apollo ? "text" : "password"}
                                                 value={apiKeys.apollo}
                                                 onChange={(e) => setApiKeys(prev => ({ ...prev, apollo: e.target.value }))}
                                                 className="input"
-                                                placeholder="Free tier: 50 credits/month"
+                                                placeholder="Your Apollo.io API key"
                                             />
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Get from: https://www.apollo.io/
-                                            </p>
+                                            <div className="flex justify-between items-center mt-2">
+                                                <p className="text-xs text-gray-500">
+                                                    Free tier: 50 credits/month - Get from: https://www.apollo.io/
+                                                </p>
+                                                {apiStatus.apollo.usage && (
+                                                    <span className="text-xs text-blue-600">
+                                                        {apiStatus.apollo.usage} credits remaining
+                                                    </span>
+                                                )}
+                                                {apiStatus.apollo.error && (
+                                                    <span className="text-xs text-red-600">
+                                                        {apiStatus.apollo.error}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
 
-                                        <div className="bg-white p-4 rounded border">
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Hunter.io API Key (Email finding)
-                                            </label>
+                                        {/* Hunter */}
+                                        <div className="p-4 border rounded-lg">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <label className="text-sm font-medium text-gray-700">
+                                                    Hunter.io API Key (Email Verification)
+                                                </label>
+                                                <div className="flex items-center gap-2">
+                                                    {getApiStatusIcon(apiStatus.hunter)}
+                                                    <button
+                                                        onClick={() => setShowApiKeys(prev => ({...prev, hunter: !prev.hunter}))}
+                                                        className="text-xs text-gray-500 hover:text-gray-700"
+                                                    >
+                                                        {showApiKeys.hunter ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                    </button>
+                                                </div>
+                                            </div>
                                             <input
-                                                type="password"
+                                                type={showApiKeys.hunter ? "text" : "password"}
                                                 value={apiKeys.hunter}
                                                 onChange={(e) => setApiKeys(prev => ({ ...prev, hunter: e.target.value }))}
                                                 className="input"
-                                                placeholder="Free tier: 25 searches/month"
+                                                placeholder="Your Hunter.io API key"
                                             />
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Get from: https://hunter.io
-                                            </p>
+                                            <div className="flex justify-between items-center mt-2">
+                                                <p className="text-xs text-gray-500">
+                                                    Free tier: 25 searches/month - Get from: https://hunter.io
+                                                </p>
+                                                {apiStatus.hunter.usage && (
+                                                    <span className="text-xs text-blue-600">
+                                                        {apiStatus.hunter.usage} searches remaining
+                                                    </span>
+                                                )}
+                                                {apiStatus.hunter.error && (
+                                                    <span className="text-xs text-red-600">
+                                                        {apiStatus.hunter.error}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <button
-                                    onClick={handleSaveApiKeys}
-                                    disabled={apiLoading}
-                                    className="btn btn-primary"
-                                >
-                                    {apiLoading ? 'Saving...' : 'Save API Configuration'}
-                                </button>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={handleSaveApiKeys}
+                                        disabled={apiLoading}
+                                        className="btn btn-primary"
+                                    >
+                                        {apiLoading ? 'Saving...' : 'Save & Test API Keys'}
+                                    </button>
+
+                                    <button
+                                        onClick={testAllConnections}
+                                        disabled={apiLoading}
+                                        className="btn btn-secondary"
+                                    >
+                                        {apiLoading ? 'Testing...' : 'Test All Connections'}
+                                    </button>
+                                </div>
+
+                                {/* API Status Dashboard */}
+                                <div className="bg-gray-50 p-4 rounded-lg">
+                                    <h4 className="font-medium text-gray-800 mb-3">API Status Dashboard</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                        <div className="bg-white p-3 rounded border">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                {getApiStatusIcon(apiStatus.openai)}
+                                                <span className="font-medium">OpenAI</span>
+                                            </div>
+                                            <p className="text-gray-600">
+                                                {apiStatus.openai.testing ? 'Testing...' :
+                                                    apiStatus.openai.connected ? 'Connected' :
+                                                        apiStatus.openai.error ? apiStatus.openai.error : 'Not connected'}
+                                            </p>
+                                        </div>
+                                        <div className="bg-white p-3 rounded border">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                {getApiStatusIcon(apiStatus.apollo)}
+                                                <span className="font-medium">Apollo.io</span>
+                                            </div>
+                                            <p className="text-gray-600">
+                                                {apiStatus.apollo.testing ? 'Testing...' :
+                                                    apiStatus.apollo.connected ? 'Connected' :
+                                                        apiStatus.apollo.error ? apiStatus.apollo.error : 'Not connected'}
+                                            </p>
+                                        </div>
+                                        <div className="bg-white p-3 rounded border">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                {getApiStatusIcon(apiStatus.hunter)}
+                                                <span className="font-medium">Hunter.io</span>
+                                            </div>
+                                            <p className="text-gray-600">
+                                                {apiStatus.hunter.testing ? 'Testing...' :
+                                                    apiStatus.hunter.connected ? 'Connected' :
+                                                        apiStatus.hunter.error ? apiStatus.hunter.error : 'Not connected'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>

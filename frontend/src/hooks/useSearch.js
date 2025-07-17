@@ -12,12 +12,14 @@ export const useSearch = () => {
         completed: false,
         failed: false,
         expandedNationwide: false,
+        demoMode: false,
 
         // Enhanced real-time data
         liveStats: null,
         recentActivity: [],
         performanceMetrics: {},
-        apiUsage: {}
+        apiUsage: {},
+        error: null
     });
 
     const [searchHistory, setSearchHistory] = useState([]);
@@ -26,9 +28,11 @@ export const useSearch = () => {
     // Use refs to track polling state
     const pollIntervalRef = useRef(null);
     const lastUpdateRef = useRef(null);
+    const lastJobIdRef = useRef(null);
 
     const startSearch = async (searchParams) => {
         try {
+            console.log('🚀 Starting search with params:', searchParams);
             setError(null);
             setSearchStatus(prev => ({
                 ...prev,
@@ -36,25 +40,43 @@ export const useSearch = () => {
                 completed: false,
                 failed: false,
                 progress: 0,
+                currentStep: searchParams.demoMode ? 'Starting demo search...' : 'Starting AI analysis...',
+                phase: 'profile-analysis',
+                demoMode: searchParams.demoMode || false,
                 liveStats: null,
                 recentActivity: [],
                 performanceMetrics: {},
-                apiUsage: {}
+                apiUsage: {},
+                error: null
             }));
 
-            const response = await searchAPI.start(searchParams);
+            // Try the new API method first, fallback to the old one
+            let response;
+            try {
+                response = await searchAPI.startSearch(searchParams);
+            } catch (err) {
+                response = await searchAPI.start(searchParams);
+            }
 
-            if (response.data.success) {
+            if (response.success || response.data?.success) {
+                const jobId = response.jobId || response.data?.jobId;
+                lastJobIdRef.current = jobId;
+
                 // Start more frequent polling for real-time updates
                 startProgressPolling();
-                return { success: true, jobId: response.data.jobId };
+                return { success: true, jobId };
             } else {
-                throw new Error(response.data.message || 'Search failed');
+                throw new Error(response.message || response.data?.message || 'Search failed');
             }
         } catch (err) {
             console.error('Failed to start search:', err);
             setError(err.message);
-            setSearchStatus(prev => ({ ...prev, isRunning: false, failed: true }));
+            setSearchStatus(prev => ({
+                ...prev,
+                isRunning: false,
+                failed: true,
+                error: err.message
+            }));
             return { success: false, error: err.message };
         }
     };
@@ -69,7 +91,7 @@ export const useSearch = () => {
         pollIntervalRef.current = setInterval(async () => {
             try {
                 const response = await searchAPI.getProgress();
-                const progress = response.data;
+                const progress = response.data || response;
 
                 // Only update if there's actual change to avoid unnecessary re-renders
                 const hasChanged = !lastUpdateRef.current ||
@@ -86,7 +108,8 @@ export const useSearch = () => {
                             recentActivity: progress.recentActivity || prevStatus.recentActivity || [],
                             liveStats: progress.liveStats || prevStatus.liveStats,
                             performanceMetrics: progress.performanceMetrics || prevStatus.performanceMetrics || {},
-                            apiUsage: progress.apiUsage || prevStatus.apiUsage || {}
+                            apiUsage: progress.apiUsage || prevStatus.apiUsage || {},
+                            error: null
                         };
 
                         return newStatus;
@@ -114,6 +137,11 @@ export const useSearch = () => {
                     clearInterval(pollIntervalRef.current);
                     pollIntervalRef.current = null;
                     setError('Lost connection to server');
+                    setSearchStatus(prevStatus => ({
+                        ...prevStatus,
+                        error: 'Lost connection to server',
+                        isRunning: false
+                    }));
                 }
             }
         }, 1000); // Poll every 1 second for real-time feel
@@ -123,16 +151,31 @@ export const useSearch = () => {
 
     const pauseSearch = async () => {
         try {
-            await searchAPI.pause();
-            setSearchStatus(prev => ({ ...prev, isRunning: false }));
-
-            // Stop polling when paused
-            if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
-                pollIntervalRef.current = null;
+            // Try both API methods for compatibility
+            let response;
+            try {
+                response = await searchAPI.pauseSearch();
+            } catch (err) {
+                response = await searchAPI.pause();
             }
 
-            return { success: true };
+            if (response.success || response.data?.success) {
+                setSearchStatus(prev => ({
+                    ...prev,
+                    isRunning: false,
+                    currentStep: 'Search paused by user'
+                }));
+
+                // Stop polling when paused
+                if (pollIntervalRef.current) {
+                    clearInterval(pollIntervalRef.current);
+                    pollIntervalRef.current = null;
+                }
+
+                return { success: true };
+            } else {
+                throw new Error(response.message || 'Failed to pause search');
+            }
         } catch (err) {
             console.error('Failed to pause search:', err);
             setError(err.message);
@@ -151,6 +194,28 @@ export const useSearch = () => {
             console.error('Failed to resume search:', err);
             setError(err.message);
             return { success: false, error: err.message };
+        }
+    };
+
+    // Resume search monitoring (useful if page is refreshed during search)
+    const resumeSearchMonitoring = async () => {
+        try {
+            const response = await searchAPI.getProgress();
+            const progress = response.data || response;
+
+            if (progress && progress.isRunning) {
+                setSearchStatus(prevStatus => ({
+                    ...prevStatus,
+                    ...progress,
+                    error: null
+                }));
+                startProgressPolling();
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Failed to resume search monitoring:', error);
+            return false;
         }
     };
 
@@ -177,18 +242,73 @@ export const useSearch = () => {
         }
     };
 
+    // Reset search status
+    const resetSearch = () => {
+        if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+        }
+
+        setSearchStatus({
+            isRunning: false,
+            progress: 0,
+            currentStep: '',
+            phase: 'profile-analysis',
+            totalFound: 0,
+            aiAnalysis: '',
+            completed: false,
+            failed: false,
+            expandedNationwide: false,
+            demoMode: false,
+            liveStats: null,
+            recentActivity: [],
+            performanceMetrics: {},
+            apiUsage: {},
+            error: null
+        });
+
+        lastJobIdRef.current = null;
+        setError(null);
+    };
+
     const loadSearchHistory = async () => {
         try {
             const response = await searchAPI.getHistory();
-            setSearchHistory(response.data || []);
+            const data = response.data || response;
+
+            if (response.success !== false) {
+                setSearchHistory(data || []);
+                return { success: true, data };
+            } else {
+                throw new Error(response.message || 'Failed to load search history');
+            }
         } catch (err) {
             console.error('Failed to load search history:', err);
+            return { success: false, error: err.message };
         }
     };
 
     // Get current search statistics
     const getSearchStats = () => {
-        if (!searchStatus.liveStats) return null;
+        if (!searchStatus.liveStats) {
+            // Return basic stats if no live stats
+            return {
+                totalSearches: searchHistory.length,
+                successfulSearches: searchHistory.filter(s => s.status === 'completed').length,
+                failedSearches: searchHistory.filter(s => s.status === 'failed').length,
+                averageCompaniesFound: searchHistory.length > 0
+                    ? Math.round(searchHistory.reduce((sum, s) => sum + (s.results?.companiesFound || 0), 0) / searchHistory.length)
+                    : 0,
+                totalCompaniesFound: searchHistory.reduce((sum, s) => sum + (s.results?.companiesFound || 0), 0),
+                currentSearch: {
+                    jobId: lastJobIdRef.current,
+                    isRunning: searchStatus.isRunning,
+                    progress: searchStatus.progress,
+                    phase: searchStatus.phase,
+                    demoMode: searchStatus.demoMode
+                }
+            };
+        }
 
         const stats = searchStatus.liveStats;
         return {
@@ -221,7 +341,21 @@ export const useSearch = () => {
 
             // Error tracking
             processingErrors: stats.processingErrors || 0,
-            apiErrors: stats.apiErrors || 0
+            apiErrors: stats.apiErrors || 0,
+
+            // History stats
+            totalSearches: searchHistory.length,
+            successfulSearches: searchHistory.filter(s => s.status === 'completed').length,
+            failedSearches: searchHistory.filter(s => s.status === 'failed').length,
+
+            // Current search info
+            currentSearch: {
+                jobId: lastJobIdRef.current,
+                isRunning: searchStatus.isRunning,
+                progress: searchStatus.progress,
+                phase: searchStatus.phase,
+                demoMode: searchStatus.demoMode
+            }
         };
     };
 
@@ -265,6 +399,51 @@ export const useSearch = () => {
             searchStatus.liveStats?.currentCompany;
     };
 
+    // Check if search is currently active
+    const isSearchActive = () => {
+        return searchStatus.isRunning || searchStatus.progress > 0;
+    };
+
+    // Get current search phase info
+    const getCurrentPhaseInfo = () => {
+        const phases = {
+            'profile-analysis': {
+                label: 'Profile Analysis',
+                description: searchStatus.demoMode
+                    ? 'Demo: Simulating AI analysis of your profile'
+                    : 'AI is analyzing your resume and preferences',
+                icon: '🤖',
+                estimatedDuration: '30 seconds'
+            },
+            'company-generation': {
+                label: 'Finding Companies',
+                description: searchStatus.demoMode
+                    ? 'Demo: Generating sample company matches'
+                    : 'AI is generating company matches based on your profile',
+                icon: '🔍',
+                estimatedDuration: '1-2 minutes'
+            },
+            'company-processing': {
+                label: 'Processing Details',
+                description: searchStatus.demoMode
+                    ? 'Demo: Simulating company data enrichment'
+                    : 'Enriching company data and finding HR contacts',
+                icon: '⚡',
+                estimatedDuration: '5-10 minutes'
+            },
+            'completed': {
+                label: 'Completed',
+                description: searchStatus.demoMode
+                    ? 'Demo search completed successfully'
+                    : 'Search completed successfully',
+                icon: '✅',
+                estimatedDuration: 'Done'
+            }
+        };
+
+        return phases[searchStatus.phase] || phases['profile-analysis'];
+    };
+
     // Get completion percentage for different phases
     const getPhaseProgress = () => {
         const phases = ['profile-analysis', 'company-generation', 'company-processing', 'completed'];
@@ -284,18 +463,24 @@ export const useSearch = () => {
         return phaseProgress;
     };
 
-    // Cleanup polling on unmount
+    // Effect to check for running searches on component mount
     useEffect(() => {
+        const checkForRunningSearch = async () => {
+            const resumed = await resumeSearchMonitoring();
+            if (!resumed) {
+                // Load search history if no running search
+                loadSearchHistory();
+            }
+        };
+
+        checkForRunningSearch();
+
+        // Cleanup polling on unmount
         return () => {
             if (pollIntervalRef.current) {
                 clearInterval(pollIntervalRef.current);
             }
         };
-    }, []);
-
-    // Load search history on mount
-    useEffect(() => {
-        loadSearchHistory();
     }, []);
 
     // Auto-resume polling if component remounts during active search
@@ -305,7 +490,15 @@ export const useSearch = () => {
         }
     }, [searchStatus.isRunning, startProgressPolling]);
 
+    // Effect to load search history when search completes
+    useEffect(() => {
+        if (searchStatus.completed || searchStatus.failed) {
+            loadSearchHistory();
+        }
+    }, [searchStatus.completed, searchStatus.failed]);
+
     return {
+        // State
         searchStatus,
         searchHistory,
         error,
@@ -315,7 +508,9 @@ export const useSearch = () => {
         pauseSearch,
         resumeSearch,
         stopSearch,
+        resetSearch,
         loadSearchHistory,
+        resumeSearchMonitoring,
 
         // Real-time data getters
         getSearchStats,
@@ -323,9 +518,11 @@ export const useSearch = () => {
         getPerformanceMetrics,
         getAPIUsage,
         getPhaseProgress,
+        getCurrentPhaseInfo,
 
         // Status checkers
         isActivelyProcessing,
+        isSearchActive,
 
         // Computed properties
         isRunning: searchStatus.isRunning,
@@ -334,6 +531,16 @@ export const useSearch = () => {
         progress: searchStatus.progress,
         currentStep: searchStatus.currentStep,
         phase: searchStatus.phase,
-        hasRealTimeData: !!searchStatus.liveStats
+        demoMode: searchStatus.demoMode,
+        hasRealTimeData: !!searchStatus.liveStats,
+
+        // Polling control (for advanced usage)
+        startPolling: startProgressPolling,
+        stopPolling: () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+            }
+        }
     };
 };

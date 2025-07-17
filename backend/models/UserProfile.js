@@ -102,7 +102,7 @@ const userProfileSchema = new mongoose.Schema({
         },
         industries: {
             type: [String],
-            enum: ['technology', 'fintech', 'healthcare', 'ecommerce', 'biotech', 'education', 'media', 'gaming', 'other'],
+            enum: ['technology', 'fintech', 'healthcare', 'ecommerce', 'biotech', 'education', 'media', 'ai-ml', 'gaming', 'other'],
             required: true
         },
         workLifeBalance: {

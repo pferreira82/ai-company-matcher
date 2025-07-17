@@ -73,7 +73,7 @@ api.interceptors.response.use(
     }
 );
 
-// Profile API
+// Enhanced Profile API
 export const profileAPI = {
     get: () => api.get('/profile'),
     save: (profile) => api.post('/profile', profile),
@@ -81,10 +81,17 @@ export const profileAPI = {
     getProfile: () => api.get('/profile'),
     saveProfile: (profile) => api.post('/profile', profile),
     updateProfile: (updates) => api.put('/profile', updates),
-    deleteProfile: () => api.delete('/profile')
+    deleteProfile: () => api.delete('/profile'),
+
+    // New methods from merged file
+    analyzeProfile: (resume, personalStatement) => api.post('/profile/analyze', { resume, personalStatement }),
+    getStats: () => api.get('/profile/stats'),
+    addInteraction: (interaction) => api.post('/profile/interactions', interaction),
+    getRecentInteractions: (limit = 10) => api.get(`/profile/interactions/recent?limit=${limit}`),
+    updateSettings: (settings) => api.put('/profile/settings', settings)
 };
 
-// Search API
+// Enhanced Search API
 export const searchAPI = {
     start: (params) => api.post('/search/ai-powered', params),
     getProgress: (jobId) => api.get(`/search/progress${jobId ? `/${jobId}` : ''}`),
@@ -136,7 +143,25 @@ export const companiesAPI = {
         }, {});
 
         return api.get('/companies/export', { params: cleanFilters });
-    }
+    },
+
+    // New methods from merged file
+    bulkDelete: (companyIds) => {
+        return api.delete('/companies/bulk', { data: { companyIds } });
+    },
+
+    advancedSearch: (params = {}) => {
+        const cleanParams = Object.keys(params).reduce((acc, key) => {
+            if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+                acc[key] = params[key];
+            }
+            return acc;
+        }, {});
+
+        return api.get('/companies/search/advanced', { params: cleanParams });
+    },
+
+    getMinimal: () => api.get('/companies/minimal')
 };
 
 // Enhanced Email API

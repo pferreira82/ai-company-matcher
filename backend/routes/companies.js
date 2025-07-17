@@ -216,7 +216,7 @@ router.put('/:id/status', async (req, res) => {
     }
 });
 
-// NEW: Bulk update companies
+// Bulk update companies
 router.put('/bulk', async (req, res) => {
     try {
         const { companyIds, updates } = req.body;
@@ -331,7 +331,7 @@ router.post('/:id/notes', async (req, res) => {
     }
 });
 
-// Delete company
+// ENHANCED: Delete company by ID (with improved logging and response)
 router.delete('/:id', async (req, res) => {
     try {
         const company = await Company.findByIdAndDelete(req.params.id);
@@ -345,12 +345,19 @@ router.delete('/:id', async (req, res) => {
 
         logger.info('Company deleted:', {
             companyId: req.params.id,
-            companyName: company.name
+            companyName: company.name,
+            deletedAt: new Date()
         });
 
         res.json({
             success: true,
-            message: 'Company deleted successfully'
+            message: 'Company deleted successfully',
+            data: {
+                deletedCompany: {
+                    id: company._id,
+                    name: company.name
+                }
+            }
         });
 
     } catch (error) {
@@ -362,7 +369,54 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// NEW: Export companies data
+// NEW: Bulk delete companies
+router.delete('/bulk', async (req, res) => {
+    try {
+        const { companyIds } = req.body;
+
+        if (!companyIds || !Array.isArray(companyIds) || companyIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Company IDs array is required'
+            });
+        }
+
+        // Get company names for logging before deletion
+        const companiesToDelete = await Company.find(
+            { _id: { $in: companyIds } },
+            { name: 1 }
+        ).lean();
+
+        const result = await Company.deleteMany({
+            _id: { $in: companyIds }
+        });
+
+        logger.info('Bulk company deletion:', {
+            companyIds,
+            deletedCount: result.deletedCount,
+            companiesDeleted: companiesToDelete.map(c => c.name),
+            deletedAt: new Date()
+        });
+
+        res.json({
+            success: true,
+            message: `Deleted ${result.deletedCount} companies`,
+            data: {
+                deletedCount: result.deletedCount,
+                companiesDeleted: companiesToDelete
+            }
+        });
+
+    } catch (error) {
+        logger.error('Failed bulk company deletion:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete companies'
+        });
+    }
+});
+
+// Export companies data
 router.get('/export', async (req, res) => {
     try {
         // Build filter based on query parameters (same as main GET route)
@@ -785,7 +839,7 @@ router.get('/search/advanced', async (req, res) => {
     }
 });
 
-// NEW: Get companies with minimal data for dropdown/autocomplete
+// Get companies with minimal data for dropdown/autocomplete
 router.get('/minimal', async (req, res) => {
     try {
         const companies = await Company.find({}, {
