@@ -10,10 +10,9 @@ const logger = require('../utils/logger');
 
 // Import Bull and Redis with fallback
 let Queue, searchQueue;
+// This is good - you already handle the Redis issue properly
 try {
     Queue = require('bull');
-
-    // Create search queue with proper Redis configuration
     searchQueue = new Queue('ai company search', {
         redis: {
             port: process.env.REDIS_PORT || 6379,
@@ -21,19 +20,8 @@ try {
             retryDelayOnFailover: 100,
             enableOfflineQueue: false,
             maxRetriesPerRequest: 3,
-        },
-        defaultJobOptions: {
-            removeOnComplete: 5,
-            removeOnFail: 10,
-            attempts: 3,
-            backoff: {
-                type: 'exponential',
-                delay: 2000,
-            },
-        },
+        }
     });
-
-    logger.info('Bull queue initialized successfully');
 } catch (error) {
     logger.warn('Bull queue not available, jobs will run synchronously:', error.message);
     searchQueue = null;
@@ -713,7 +701,7 @@ async function processAISearch({ jobId, profile, location, maxResults, demoMode 
         searchJob.progress.percentage = 100;
         searchJob.progress.phase = 'completed';
         searchJob.performance.endTime = new Date();
-        searchJob.performance.duration = searchJob.performance.endTime - searchJob.performance.startTime;
+        searchJob.performance.duration = searchJob.performance.startTime - searchJob.performance.endTime;
 
         searchJob.addActivity('milestone',
             `🎉 Search completed! ${searchJob.liveStats.companiesSaved} companies saved`,

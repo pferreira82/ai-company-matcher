@@ -4,14 +4,46 @@ const Company = require('../models/Company');
 const UserProfile = require('../models/UserProfile');
 const logger = require('../utils/logger');
 
-// Generate personalized email for a company
+// Debug middleware to log all requests to this router
+router.use((req, res, next) => {
+    logger.info(`Email route accessed: ${req.method} ${req.path}`);
+    next();
+});
+
+// Test route to verify emails router is working
+router.get('/test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Email routes are working',
+        endpoints: [
+            'POST /api/emails/generate/:companyId',
+            'POST /api/emails/regenerate/:companyId',
+            'POST /api/emails/bulk-generate',
+            'GET /api/emails/templates',
+            'POST /api/emails/templates',
+            'GET /api/emails/history',
+            'PUT /api/emails/history/:companyId/:emailIndex/sent',
+            'GET /api/emails/stats'
+        ]
+    });
+});
+
+// Generate personalized email for a company (UPDATED)
 router.post('/generate/:companyId', async (req, res) => {
     try {
         const { companyId } = req.params;
         const { profile } = req.body;
 
-        // Get company details
-        const company = await Company.findById(companyId);
+        // Validate inputs
+        if (!companyId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Company ID is required'
+            });
+        }
+
+        // Get company details with HR contacts
+        const company = await Company.findById(companyId).lean();
         if (!company) {
             return res.status(404).json({
                 success: false,
@@ -27,37 +59,63 @@ router.post('/generate/:companyId', async (req, res) => {
             });
         }
 
-        // Find HR contact
-        const hrContact = company.primaryHRContact || (company.hrContacts && company.hrContacts[0]);
+        // Find the best HR contact
+        const hrContact = company.hrContacts?.find(c => c.verified) ||
+            company.hrContacts?.[0] ||
+            null;
 
-        // Generate email using AI or template
+        // Log the email generation attempt
+        logger.info('Generating AI email', {
+            companyName: company.name,
+            hasHRContact: !!hrContact,
+            userId: profile.personalInfo.email
+        });
+
+        // Generate email using AI service with fallback
         let emailTemplate;
-
         try {
-            // Try to use OpenAI service if available
             const openaiService = require('../services/openaiService');
-            emailTemplate = await generateAIEmail(profile, company, hrContact);
+            emailTemplate = await openaiService.generateAIEmail(profile, company, hrContact);
         } catch (error) {
             logger.warn('OpenAI email generation failed, using template:', error.message);
             emailTemplate = generateTemplateEmail(profile, company, hrContact);
         }
 
-        // Record email generation
-        await company.generateEmailHistory({
-            recipientEmail: hrContact?.email || 'hr@' + company.domain,
+        // Validate the generated email
+        if (!emailTemplate.content || !emailTemplate.subject) {
+            throw new Error('Failed to generate valid email content');
+        }
+
+        // Record email generation in company history
+        const emailHistoryEntry = {
+            generatedAt: new Date(),
+            recipientEmail: emailTemplate.recipientEmail,
             subject: emailTemplate.subject,
-            sent: false
+            sent: false,
+            metadata: {
+                hasAI: true,
+                templateVersion: '2.0',
+                recipientName: emailTemplate.recipientName,
+                matchScore: company.aiMatchScore
+            }
+        };
+
+        await Company.findByIdAndUpdate(companyId, {
+            $push: { emailHistory: emailHistoryEntry }
         });
 
-        // Add to user's company interactions
+        // Track in user profile
         try {
-            const userProfile = await UserProfile.findOne({ userId: 'default' });
+            const userProfile = await UserProfile.findOne({
+                'personalInfo.email': profile.personalInfo.email
+            });
+
             if (userProfile) {
                 await userProfile.addCompanyInteraction(
                     companyId,
                     company.name,
                     'email-generated',
-                    'Generated personalized email'
+                    `AI email generated for ${emailTemplate.recipientName}`
                 );
             }
         } catch (interactionError) {
@@ -66,21 +124,182 @@ router.post('/generate/:companyId', async (req, res) => {
 
         logger.info('Email generated successfully', {
             companyName: company.name,
-            recipientEmail: hrContact?.email || 'Unknown',
+            recipientEmail: emailTemplate.recipientEmail,
             userId: profile.personalInfo.email
         });
 
+        // Send successful response
         res.json({
             success: true,
-            data: emailTemplate,
+            data: {
+                ...emailTemplate,
+                companyId: company._id,
+                companyName: company.name,
+                generatedAt: new Date()
+            },
             message: 'Email generated successfully'
         });
 
     } catch (error) {
         logger.error('Failed to generate email:', error);
+
+        // Provide helpful error messages
+        let errorMessage = 'Failed to generate email';
+        if (error.message.includes('OpenAI')) {
+            errorMessage = 'AI service temporarily unavailable. Using template fallback.';
+        }
+
         res.status(500).json({
             success: false,
-            message: 'Failed to generate email'
+            message: errorMessage,
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// NEW: Regenerate email with different tone/style
+router.post('/regenerate/:companyId', async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { profile, tone = 'professional' } = req.body;
+
+        // Validate inputs
+        if (!companyId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Company ID is required'
+            });
+        }
+
+        const company = await Company.findById(companyId).lean();
+        if (!company) {
+            return res.status(404).json({
+                success: false,
+                message: 'Company not found'
+            });
+        }
+
+        if (!profile || !profile.personalInfo?.firstName || !profile.personalInfo?.email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Complete profile with name and email is required'
+            });
+        }
+
+        const hrContact = company.hrContacts?.find(c => c.verified) ||
+            company.hrContacts?.[0] ||
+            null;
+
+        // Generate email with specific tone
+        let emailTemplate;
+        try {
+            const openaiService = require('../services/openaiService');
+            emailTemplate = await openaiService.generateAIEmail(profile, company, hrContact, { tone });
+        } catch (error) {
+            logger.warn('OpenAI regeneration failed, using template:', error.message);
+            emailTemplate = generateTemplateEmail(profile, company, hrContact);
+        }
+
+        res.json({
+            success: true,
+            data: {
+                ...emailTemplate,
+                companyId: company._id,
+                companyName: company.name,
+                tone,
+                generatedAt: new Date()
+            },
+            message: 'Email regenerated successfully'
+        });
+
+    } catch (error) {
+        logger.error('Failed to regenerate email:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to regenerate email'
+        });
+    }
+});
+
+// NEW: Bulk email generation endpoint
+router.post('/bulk-generate', async (req, res) => {
+    try {
+        const { companyIds, profile } = req.body;
+
+        if (!companyIds || !Array.isArray(companyIds) || companyIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Company IDs array is required'
+            });
+        }
+
+        if (!profile || !profile.personalInfo?.firstName || !profile.personalInfo?.email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Complete profile with name and email is required'
+            });
+        }
+
+        const results = [];
+        const errors = [];
+
+        for (const companyId of companyIds) {
+            try {
+                const company = await Company.findById(companyId).lean();
+                if (!company) {
+                    errors.push({ companyId, error: 'Company not found' });
+                    continue;
+                }
+
+                const hrContact = company.hrContacts?.find(c => c.verified) ||
+                    company.hrContacts?.[0] ||
+                    null;
+
+                let emailTemplate;
+                try {
+                    const openaiService = require('../services/openaiService');
+                    emailTemplate = await openaiService.generateAIEmail(profile, company, hrContact);
+                } catch (error) {
+                    logger.warn(`AI generation failed for ${company.name}, using template`);
+                    emailTemplate = generateTemplateEmail(profile, company, hrContact);
+                }
+
+                results.push({
+                    companyId,
+                    companyName: company.name,
+                    email: emailTemplate
+                });
+
+                // Add delay to avoid rate limits
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+            } catch (error) {
+                errors.push({
+                    companyId,
+                    error: error.message
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                generated: results,
+                failed: errors,
+                summary: {
+                    total: companyIds.length,
+                    successful: results.length,
+                    failed: errors.length
+                }
+            },
+            message: `Bulk generation completed: ${results.length}/${companyIds.length} successful`
+        });
+
+    } catch (error) {
+        logger.error('Failed bulk email generation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to generate bulk emails'
         });
     }
 });
@@ -177,45 +396,70 @@ ${profile.personalInfo.phone || ''}`;
     };
 }
 
-// Get email templates
+// Helper function for default templates
+function getDefaultEmailTemplates() {
+    return [
+        {
+            name: 'Professional Informational Interview',
+            subject: 'Informational Interview Request - {senderName}',
+            body: `Dear {recipientName},
+
+I hope this email finds you well. My name is {senderName}, and I'm a {currentTitle} with a keen interest in {companyName}'s work in the {industry} sector.
+
+I've been following {companyName}'s journey and am particularly impressed by your innovative approach. I would greatly appreciate the opportunity to learn more about your company culture and current initiatives.
+
+Would you be available for a brief 15-20 minute informational interview in the coming weeks? I'm happy to work around your schedule.
+
+Thank you for considering my request.
+
+Best regards,
+{senderName}
+{email}
+{phone}`,
+            variables: ['recipientName', 'senderName', 'currentTitle', 'companyName', 'industry', 'email', 'phone'],
+            isDefault: true,
+            createdAt: new Date(),
+            useCount: 0
+        },
+        {
+            name: 'Casual Networking Request',
+            subject: 'Coffee Chat Request - Fellow {industry} Professional',
+            body: `Hi {recipientName},
+
+I'm {senderName}, a {currentTitle} based in {location}. I came across {companyName} and was really intrigued by what you're building.
+
+I'd love to grab a virtual coffee and hear about your experience at {companyName}. I'm particularly interested in learning about your team's approach to {industry} challenges.
+
+Would you have 20 minutes for a quick chat sometime next week?
+
+Thanks!
+{senderName}`,
+            variables: ['recipientName', 'senderName', 'currentTitle', 'location', 'companyName', 'industry'],
+            isDefault: false,
+            createdAt: new Date(),
+            useCount: 0
+        }
+    ];
+}
+
+// Get email templates (UPDATED)
 router.get('/templates', async (req, res) => {
     try {
         const profile = await UserProfile.findOne({ userId: 'default' });
 
-        const templates = profile?.emailTemplates || [];
+        let templates = profile?.emailTemplates || [];
 
         // Add default templates if none exist
         if (templates.length === 0) {
-            const defaultTemplates = [
-                {
-                    name: 'Informational Interview Request',
-                    subject: 'Informational Interview Request - {firstName} {lastName}',
-                    body: `Dear {recipientName},
-
-I hope this email finds you well. My name is {firstName} {lastName}, and I'm a {currentTitle} interested in learning more about opportunities at {companyName}.
-
-Your company's work in {industry} particularly caught my attention, and I believe my background would be a strong fit for your team.
-
-About me:
-• {currentTitle} with {experience} level experience
-• Strong background in {skills}
-• Passionate about {interests}
-
-I would appreciate the opportunity to have a brief informational interview to learn more about {companyName} and discuss how I might contribute to your team.
-
-Thank you for your time and consideration.
-
-Best regards,
-{firstName} {lastName}
-{email}
-{phone}`,
-                    isDefault: true,
-                    createdAt: new Date()
-                }
-            ];
-
-            templates.push(...defaultTemplates);
+            templates = getDefaultEmailTemplates();
         }
+
+        // Sort by most recently used
+        templates.sort((a, b) => {
+            if (a.isDefault) return -1;
+            if (b.isDefault) return 1;
+            return (b.lastUsed || 0) - (a.lastUsed || 0);
+        });
 
         res.json({
             success: true,
@@ -231,34 +475,67 @@ Best regards,
     }
 });
 
-// Save email template
+// Save custom email template (UPDATED)
 router.post('/templates', async (req, res) => {
     try {
-        const { name, subject, body, isDefault } = req.body;
+        const { name, subject, body, variables, isDefault } = req.body;
 
         if (!name || !subject || !body) {
             return res.status(400).json({
                 success: false,
-                message: 'Name, subject, and body are required'
+                message: 'Template name, subject, and body are required'
             });
         }
 
+        // Get user profile
         const profile = await UserProfile.findOne({ userId: 'default' });
-
         if (!profile) {
             return res.status(404).json({
                 success: false,
-                message: 'Profile not found'
+                message: 'User profile not found'
             });
         }
 
-        await profile.addEmailTemplate(name, subject, body, isDefault);
+        // Initialize email templates if not exists
+        if (!profile.emailTemplates) {
+            profile.emailTemplates = [];
+        }
+
+        // If setting as default, remove default from others
+        if (isDefault) {
+            profile.emailTemplates.forEach(template => {
+                template.isDefault = false;
+            });
+        }
+
+        // Add new template
+        const newTemplate = {
+            name,
+            subject,
+            body,
+            variables: variables || [
+                'recipientName',
+                'companyName',
+                'industry',
+                'senderName',
+                'currentTitle',
+                'location'
+            ],
+            isDefault: isDefault || false,
+            createdAt: new Date(),
+            lastUsed: null,
+            useCount: 0
+        };
+
+        profile.emailTemplates.push(newTemplate);
+        await profile.save();
 
         logger.info('Email template saved:', { name, isDefault });
 
         res.json({
             success: true,
-            message: 'Email template saved successfully'
+            message: 'Email template saved successfully',
+            data: newTemplate
         });
 
     } catch (error) {
@@ -296,7 +573,8 @@ router.get('/history', async (req, res) => {
                     recipientEmail: email.recipientEmail,
                     subject: email.subject,
                     sent: email.sent,
-                    generatedAt: email.generatedAt
+                    generatedAt: email.generatedAt,
+                    metadata: email.metadata
                 });
             });
         });

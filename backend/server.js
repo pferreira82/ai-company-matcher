@@ -1,8 +1,10 @@
+// backend/server.js
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 require('dotenv').config();
 
 // Add process timing
@@ -25,15 +27,17 @@ try {
     logger.info(`⏱️  Fallback logger initialized (${Date.now() - startTime}ms)`);
 }
 
-// Initialize Express app FIRST
+// Initialize Express app
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 logger.info(`⚡ Express app initialized (${Date.now() - startTime}ms)`);
 
 // Security middleware
 app.use(helmet());
+
+// CORS configuration
 app.use(cors({
     origin: [
         'http://localhost:3000',
@@ -51,8 +55,19 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Body parsing middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+    logger.info(`${req.method} ${req.path}`, {
+        body: req.body,
+        params: req.params,
+        query: req.query
+    });
+    next();
+});
 
 logger.info(`🔧 Middleware configured (${Date.now() - startTime}ms)`);
 
@@ -77,43 +92,10 @@ try {
         stack: modelError.stack,
         name: modelError.name
     });
-
     logger.error('Model loading failed - this may cause issues later');
 }
 
-// Database connection
-logger.info(`🔌 Attempting to connect to MongoDB... (${Date.now() - startTime}ms)`);
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai-company-matcher')
-    .then(() => {
-        logger.info(`✅ Connected to MongoDB successfully (${Date.now() - startTime}ms)`);
-        return mongoose.connection.db.admin().ping();
-    })
-    .then(() => {
-        logger.info(`📊 MongoDB ping successful (${Date.now() - startTime}ms)`);
-    })
-    .catch(err => {
-        logger.error(`❌ MongoDB connection failed at ${Date.now() - startTime}ms:`, {
-            message: err.message,
-            code: err.code,
-            name: err.name
-        });
-        logger.warn('⚠️  Continuing without MongoDB - some features may not work');
-    });
-
-// MongoDB connection events
-mongoose.connection.on('error', (err) => {
-    logger.error('💥 MongoDB connection error:', err.message);
-});
-
-mongoose.connection.on('disconnected', () => {
-    logger.warn('🔌 MongoDB disconnected');
-});
-
-mongoose.connection.on('reconnected', () => {
-    logger.info('🔄 MongoDB reconnected');
-});
-
-// Redis connection
+// Redis connection (optional)
 let redisAvailable = false;
 try {
     const redis = require('redis');
@@ -157,27 +139,42 @@ try {
     const profileRoutes = require('./routes/profile');
     logger.info(`✅ Profile routes loaded (${Date.now() - startTime}ms)`);
 
-    const searchRoutes = require('./routes/aiSearch');
-    logger.info(`✅ Search routes loaded (${Date.now() - startTime}ms)`);
-
-    const companyRoutes = require('./routes/companies');
-    logger.info(`✅ Company routes loaded (${Date.now() - startTime}ms)`);
+    const companiesRoutes = require('./routes/companies');
+    logger.info(`✅ Companies routes loaded (${Date.now() - startTime}ms)`);
 
     const emailRoutes = require('./routes/emails');
     logger.info(`✅ Email routes loaded (${Date.now() - startTime}ms)`);
 
+    const searchRoutes = require('./routes/aiSearch');
+    logger.info(`✅ Search routes loaded (${Date.now() - startTime}ms)`);
+
     const configRoutes = require('./routes/config');
     logger.info(`✅ Config routes loaded (${Date.now() - startTime}ms)`);
 
-    // Register routes with app
+    // Mount routes - preserving your existing paths
     app.use('/api/profile', profileRoutes);
+    app.use('/api/companies', companiesRoutes);
+    app.use('/api/emails', emailRoutes);  // Your existing email routes path
     app.use('/api/search', searchRoutes);
-    app.use('/api/companies', companyRoutes);
-    app.use('/api/matches', companyRoutes);
-    app.use('/api/email', emailRoutes);
+    app.use('/api/ai-search', searchRoutes); // Alternative path
     app.use('/api/config', configRoutes);
 
     logger.info(`📁 All routes registered successfully (${Date.now() - startTime}ms)`);
+
+    // Add debugging:
+    try {
+        // Log all registered routes
+        logger.info('Registered routes:');
+        app._router.stack.forEach((middleware, index) => {
+            if (middleware.route) {
+                logger.info(`Route ${index}: ${Object.keys(middleware.route.methods)} ${middleware.route.path}`);
+            } else if (middleware.name === 'router') {
+                logger.info(`Router ${index}: ${middleware.regexp}`);
+            }
+        });
+    } catch (debugError) {
+        logger.error('Debug logging failed:', debugError);
+    }
 
 } catch (routeError) {
     logger.error(`❌ Failed to load routes at ${Date.now() - startTime}ms:`, {
@@ -185,11 +182,32 @@ try {
         stack: routeError.stack,
         name: routeError.name
     });
-
     logger.error('Route loading failed - server may not work properly');
 }
 
-// Health check endpoint
+// Enhanced health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'OK',
+        message: 'AI Company Matcher API is running',
+        timestamp: new Date().toISOString(),
+        port: PORT,
+        environment: process.env.NODE_ENV || 'development',
+        routes: {
+            profile: '/api/profile',
+            companies: '/api/companies',
+            emails: '/api/emails',
+            search: '/api/search',
+            config: '/api/config'
+        },
+        services: {
+            mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+            redis: redisAvailable ? 'connected' : 'not available'
+        }
+    });
+});
+
+// Alternative health check endpoint
 app.get('/health', (req, res) => {
     res.json({
         status: 'OK',
@@ -212,9 +230,9 @@ app.get('/', (req, res) => {
         endpoints: {
             health: '/health',
             profile: '/api/profile',
+            companies: '/api/companies',
+            emails: '/api/emails',
             search: '/api/search',
-            matches: '/api/matches',
-            email: '/api/email',
             config: '/api/config'
         }
     });
@@ -230,26 +248,77 @@ app.get('/api/status', (req, res) => {
     });
 });
 
+// 404 handler for API routes
+app.use((req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+        logger.warn(`404 - Route not found: ${req.originalUrl}`);
+        res.status(404).json({
+            success: false,
+            message: 'API endpoint not found',
+            path: req.originalUrl
+        });
+    } else {
+        next();
+    }
+});
+
+// General 404 handler
+app.use((req, res) => {
+    res.status(404).json({ message: `Endpoint not found: ${req.method} ${req.path}` });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
-    logger.error('Express error occurred:', err.message);
+    logger.error('Unhandled error:', err);
     res.status(500).json({
-        message: 'Something went wrong!',
-        error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+        success: false,
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
     });
 });
 
-// 404 handler
-app.use((req, res) => {
-    res.status(404).json({ message: `Endpoint not found: ${req.method} ${req.path}` });
+// Enhanced MongoDB connection
+logger.info(`🔌 Attempting to connect to MongoDB... (${Date.now() - startTime}ms)`);
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ai-company-matcher', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+})
+    .then(() => {
+        logger.info(`✅ Connected to MongoDB successfully (${Date.now() - startTime}ms)`);
+        return mongoose.connection.db.admin().ping();
+    })
+    .then(() => {
+        logger.info(`📊 MongoDB ping successful (${Date.now() - startTime}ms)`);
+    })
+    .catch(err => {
+        logger.error(`❌ MongoDB connection failed at ${Date.now() - startTime}ms:`, {
+            message: err.message,
+            code: err.code,
+            name: err.name
+        });
+        logger.warn('⚠️  Continuing without MongoDB - some features may not work');
+    });
+
+// MongoDB connection events
+mongoose.connection.on('error', (err) => {
+    logger.error('💥 MongoDB connection error:', err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+    logger.warn('🔌 MongoDB disconnected');
+});
+
+mongoose.connection.on('reconnected', () => {
+    logger.info('🔄 MongoDB reconnected');
 });
 
 // Start server
 let server;
 try {
     server = app.listen(PORT, HOST, () => {
-        logger.info(`🚀 Server running on http://${HOST}:${PORT} (${Date.now() - startTime}ms)`);
-        logger.info(`📊 Health check: http://${HOST}:${PORT}/health`);
+        logger.info(`🚀 Server is running on http://${HOST}:${PORT} (${Date.now() - startTime}ms)`);
+        logger.info(`📍 API endpoints available at http://${HOST}:${PORT}/api`);
+        logger.info(`📊 Health check: http://${HOST}:${PORT}/api/health`);
         logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
         // Log service status after a delay

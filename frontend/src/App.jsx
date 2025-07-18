@@ -332,6 +332,33 @@ const App = () => {
         }
     };
 
+    // Delete without confirmation (for bulk operations)
+    const handleDeleteCompanyNoConfirm = async (companyId) => {
+        const result = await execute(() => companiesAPI.deleteCompany(companyId), 'companies');
+        if (result.success) {
+            setCompanies(prev => prev.filter(c => (c.id || c._id) !== companyId));
+            return true;
+        } else {
+            addNotification('Failed to delete company: ' + result.error, 'error');
+            return false;
+        }
+    };
+
+    // Handle bulk delete with ONE confirmation
+    const handleBulkDelete = async (companyIds) => {
+        if (!confirm(`Are you sure you want to delete ${companyIds.length} selected companies? This action cannot be undone.`)) {
+            return;
+        }
+
+        let successCount = 0;
+        for (const companyId of companyIds) {
+            const success = await handleDeleteCompanyNoConfirm(companyId);
+            if (success) successCount++;
+        }
+
+        addNotification(`Deleted ${successCount} of ${companyIds.length} companies`, 'success');
+    };
+
     const handleStartSearch = async () => {
         // In demo mode, allow search without API keys
         if (!demoMode && (!apiKeys.openai || !apiKeys.apollo)) {
@@ -388,22 +415,38 @@ const App = () => {
     };
 
     const handleGenerateEmail = async (company) => {
+        console.log('Generating email for company:', company);
+
         if (!profile.personalInfo?.firstName || !profile.personalInfo?.email) {
             addNotification('Please complete your personal information before generating emails', 'error');
             setActiveTab('profile');
             return;
         }
 
-        const result = await execute(() => emailAPI.generate(company.id || company._id, profile), 'openai');
-        if (result.success) {
-            setEmailModal({
-                isOpen: true,
-                company,
-                template: result.data
-            });
-            addNotification(`Email generated for ${company.name}`, 'success');
-        } else {
-            addNotification('Failed to generate email: ' + result.error, 'error');
+        try {
+            setApiLoading(true);
+            addNotification(`Generating email for ${company.name}...`, 'info');
+
+            const result = await execute(() => emailAPI.generate(company.id || company._id, profile), 'openai');
+
+            console.log('Email generation result:', result);
+
+            if (result.success && result.data) {
+                setEmailModal({
+                    isOpen: true,
+                    company,
+                    template: result.data.data || result.data  // Handle nested data structure
+                });
+                addNotification(`Email generated for ${company.name}`, 'success');
+            } else {
+                console.error('Email generation failed:', result);
+                addNotification('Failed to generate email: ' + (result.error || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            console.error('Email generation error:', error);
+            addNotification('Failed to generate email: ' + error.message, 'error');
+        } finally {
+            setApiLoading(false);
         }
     };
 
@@ -984,6 +1027,7 @@ const App = () => {
                                 onGenerateEmail={handleGenerateEmail}
                                 onUpdateStatus={handleUpdateCompanyStatus}
                                 onDeleteCompany={handleDeleteCompany}
+                                onBulkDelete={handleBulkDelete}
                                 userProfile={profile}
                             />
                         )}

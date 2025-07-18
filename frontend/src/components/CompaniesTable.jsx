@@ -18,8 +18,9 @@ import {
     Trash2,
     MoreHorizontal
 } from 'lucide-react';
+import CompanyModal from './CompanyModal';
 
-const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCompany, userProfile }) => {
+const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCompany, onBulkDelete, userProfile }) => {
     const [filteredCompanies, setFilteredCompanies] = useState(companies);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -28,6 +29,8 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
     const [sortOrder, setSortOrder] = useState('desc');
     const [selectedCompanies, setSelectedCompanies] = useState(new Set());
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+    const [selectedCompanyForModal, setSelectedCompanyForModal] = useState(null);
+    const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
 
     useEffect(() => {
         let filtered = [...companies];
@@ -116,6 +119,11 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
         }
     };
 
+    const handleCompanyClick = (company) => {
+        setSelectedCompanyForModal(company);
+        setIsCompanyModalOpen(true);
+    };
+
     const handleSelectCompany = (companyId) => {
         const newSelected = new Set(selectedCompanies);
         if (newSelected.has(companyId)) {
@@ -142,14 +150,60 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
     };
 
     const handleBulkDelete = () => {
-        if (!confirm(`Are you sure you want to delete ${selectedCompanies.size} selected companies? This action cannot be undone.`)) {
+        const companyIds = Array.from(selectedCompanies);
+        onBulkDelete(companyIds);  // Just call parent handler (no confirmation here)
+        setSelectedCompanies(new Set());
+    };
+
+    // In CompaniesTable.jsx, add this function after handleBulkDelete:
+
+    const handleBulkGenerateEmails = async () => {
+        if (selectedCompanies.size === 0) {
+            alert('Please select companies first');
             return;
         }
 
-        selectedCompanies.forEach(companyId => {
-            onDeleteCompany(companyId);
-        });
-        setSelectedCompanies(new Set());
+        if (!userProfile?.personalInfo?.firstName || !userProfile?.personalInfo?.email) {
+            alert('Please complete your profile before generating emails');
+            return;
+        }
+
+        const companyIds = Array.from(selectedCompanies);
+
+        if (!confirm(`Generate emails for ${companyIds.length} selected companies?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/emails/bulk-generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    companyIds,
+                    profile: userProfile
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert(`Generated ${result.data.summary.successful} emails successfully!`);
+                setSelectedCompanies(new Set());
+
+                // Optionally show the generated emails
+                if (result.data.generated.length > 0) {
+                    console.log('Generated emails:', result.data.generated);
+                    // You could open a modal here to show all generated emails
+                }
+            } else {
+                alert('Failed to generate emails: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Bulk email generation error:', error);
+            alert('Failed to generate emails');
+        }
     };
 
     const handleDeleteSingle = (companyId) => {
@@ -244,6 +298,8 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
                                 onChange={(e) => {
                                     if (e.target.value === 'delete') {
                                         handleBulkDelete();
+                                    } else if (e.target.value === 'generate-emails') {
+                                        handleBulkGenerateEmails();  // Add this
                                     } else if (e.target.value) {
                                         handleBulkStatusUpdate(e.target.value);
                                     }
@@ -253,6 +309,7 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
                                 defaultValue=""
                             >
                                 <option value="">Bulk Actions</option>
+                                <option value="generate-emails" className="text-blue-600">Generate Emails</option>
                                 <option value="contacted">Mark as Contacted</option>
                                 <option value="not-contacted">Mark as Not Contacted</option>
                                 <option value="rejected">Mark as Rejected</option>
@@ -337,6 +394,11 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
                 </div>
             </div>
 
+            {/* Tooltip */}
+            <div className="bg-blue-50 p-3 rounded-lg mb-4 text-sm text-blue-700">
+                <span className="font-medium">Tip:</span> Click on any company name to view detailed information and all HR contacts.
+            </div>
+
             {/* Companies Table */}
             <div className="bg-white rounded-lg border overflow-hidden">
                 <div className="overflow-x-auto">
@@ -380,7 +442,12 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
                                         <div className="flex items-start gap-3">
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-2">
-                                                    <h3 className="font-semibold text-gray-900">{company.name}</h3>
+                                                    <h3
+                                                        className="font-semibold text-gray-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                                                        onClick={() => handleCompanyClick(company)}
+                                                    >
+                                                        {company.name}
+                                                    </h3>
                                                     {company.isLocalPriority && (
                                                         <Star className="w-4 h-4 text-blue-500 fill-current" />
                                                     )}
@@ -402,6 +469,7 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
                                                                 className="text-blue-600 hover:underline text-xs"
+                                                                onClick={(e) => e.stopPropagation()} // Prevent modal from opening
                                                             >
                                                                 Website
                                                             </a>
@@ -584,6 +652,27 @@ const CompaniesTable = ({ companies, onGenerateEmail, onUpdateStatus, onDeleteCo
                     </div>
                 </div>
             )}
+
+            {/* Company Modal */}
+            <CompanyModal
+                isOpen={isCompanyModalOpen}
+                onClose={() => {
+                    setIsCompanyModalOpen(false);
+                    setSelectedCompanyForModal(null);
+                }}
+                company={selectedCompanyForModal}
+                onGenerateEmail={(company) => {
+                    onGenerateEmail(company);
+                    setIsCompanyModalOpen(false);
+                }}
+                onUpdateStatus={(companyId, status) => {
+                    onUpdateStatus(companyId, status);
+                    // Update the selected company's status in the modal
+                    if (selectedCompanyForModal && (selectedCompanyForModal.id === companyId || selectedCompanyForModal._id === companyId)) {
+                        setSelectedCompanyForModal(prev => ({ ...prev, status }));
+                    }
+                }}
+            />
         </div>
     );
 };

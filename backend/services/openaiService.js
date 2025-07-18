@@ -78,7 +78,7 @@ async function analyzeUserProfile(resume, personalStatement, demoMode = false) {
     `;
 
         const response = await openaiClient.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'system',
@@ -180,7 +180,7 @@ async function findCompanyMatches(profile, maxResults = 1000, nationwide = false
     `;
 
         const response = await openaiClient.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'system',
@@ -201,7 +201,10 @@ async function findCompanyMatches(profile, maxResults = 1000, nationwide = false
 
     } catch (error) {
         logger.error('OpenAI company matching failed:', error);
-        return generateMockCompanies(maxResults, nationwide, demoMode);
+        if (demoMode) {
+            return generateMockCompanies(maxResults, nationwide, demoMode);
+        }
+        throw error;
     }
 }
 
@@ -242,7 +245,7 @@ async function evaluateWorkLifeBalance(companyData, demoMode = false) {
     `;
 
         const response = await openaiClient.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'system',
@@ -333,7 +336,7 @@ async function evaluateCompanyMatch(profile, companyData, demoMode = false) {
     `;
 
         const response = await openaiClient.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'system',
@@ -364,6 +367,238 @@ async function evaluateCompanyMatch(profile, companyData, demoMode = false) {
             concerns: ['Competitive environment', 'Limited information']
         };
     }
+}
+
+// Generate AI-powered email for informational interviews
+// In openaiService.js, update the generateAIEmail function:
+
+async function generateAIEmail(profile, company, hrContact) {
+    try {
+        logger.info('🤖 Starting AI email generation', {
+            company: company.name,
+            hasOpenAI: !!openaiClient,
+            model: 'gpt-4o-mini'
+        });
+
+        // Check if we have OpenAI client
+        if (!openaiClient) {
+            logger.warn('OpenAI client not available, using template fallback');
+            return generateTemplateEmail(profile, company, hrContact);
+        }
+
+        const recipientName = hrContact?.name || 'Hiring Manager';
+        const recipientEmail = hrContact?.email || `hr@${company.domain}`;
+        const senderName = `${profile.personalInfo?.firstName} ${profile.personalInfo?.lastName}`;
+
+        // Build a more specific prompt for unique emails
+        const prompt = `
+Generate a UNIQUE and personalized email for an informational interview request. Make it different from standard templates.
+
+SENDER PROFILE:
+- Name: ${senderName}
+- Current Title: ${profile.currentTitle}
+- Experience Level: ${profile.experience}
+- Location: ${profile.personalInfo?.location?.city}, ${profile.personalInfo?.location?.state}
+- Key Strengths: ${profile.aiAnalysis?.strengths?.slice(0, 3).join(', ') || 'technical skills, problem-solving, collaboration'}
+- Career Interests: ${profile.aiAnalysis?.interests?.slice(0, 3).join(', ') || 'technology, innovation, growth'}
+
+COMPANY DETAILS:
+- Company Name: ${company.name}
+- Industry: ${company.industry}
+- Size: ${company.size} (${company.employeeCount || 'N/A'} employees)
+- Location: ${company.location}
+- Match Score: ${company.aiMatchScore}%
+- Company Highlights: ${company.highlights?.slice(0, 3).join(', ') || 'innovative culture, growth opportunities'}
+
+RECIPIENT:
+- Name: ${recipientName}
+- Title: ${hrContact?.title || 'HR Professional'}
+
+REQUIREMENTS:
+1. Make this email UNIQUE - avoid generic phrases
+2. Reference something SPECIFIC about ${company.name}
+3. Show genuine interest in the company's work in ${company.industry}
+4. Keep it concise (150-250 words)
+5. Be warm but professional
+6. Include a clear ask for a 15-20 minute conversation
+7. DO NOT use these overused phrases: "I hope this email finds you well", "I'm reaching out", "I came across"
+
+Generate a fresh, engaging email that stands out from typical networking emails.
+`;
+
+        logger.info('📝 Calling OpenAI API for email generation');
+
+        const response = await openaiClient.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are an expert at writing personalized, engaging networking emails that get responses. Each email should be unique and tailored to the specific company and person.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 500,
+            temperature: 0.8,  // Increased for more variety
+            presence_penalty: 0.6,  // Encourage uniqueness
+            frequency_penalty: 0.6  // Avoid repetition
+        });
+
+        const emailContent = response.choices[0].message.content.trim();
+
+        logger.info('✅ AI email generated successfully', {
+            company: company.name,
+            contentLength: emailContent.length
+        });
+
+        // Generate unique subject line
+        const subjectPrompt = `
+Generate a unique, engaging subject line for an informational interview request email to ${company.name}.
+Make it specific to ${company.name} and their work in ${company.industry}.
+Keep it under 60 characters and avoid generic phrases like "Informational Interview Request".
+Examples: "Curious about ${company.name}'s approach to [specific thing]", "Following ${company.name}'s journey in [industry]"
+`;
+
+        const subjectResponse = await openaiClient.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+                {
+                    role: 'user',
+                    content: subjectPrompt
+                }
+            ],
+            max_tokens: 30,
+            temperature: 0.8,
+        });
+
+        const subject = subjectResponse.choices[0].message.content.trim().replace(/["']/g, '');
+
+        return {
+            recipientName,
+            recipientEmail,
+            subject,
+            content: emailContent,
+            keyPoints: [
+                `Personalized for ${recipientName} at ${company.name}`,
+                `Unique content tailored to ${company.industry}`,
+                `Match score: ${company.aiMatchScore}%`,
+                `Generated with GPT-4o-mini`,
+                `Fresh approach avoiding template language`
+            ],
+            senderInfo: {
+                name: senderName,
+                email: profile.personalInfo?.email,
+                phone: profile.personalInfo?.phone,
+                location: `${profile.personalInfo?.location?.city || ''}, ${profile.personalInfo?.location?.state || ''}`.trim(),
+                linkedin: profile.personalInfo?.linkedinUrl,
+                portfolio: profile.personalInfo?.portfolioUrl
+            },
+            companyContext: {
+                matchScore: company.aiMatchScore,
+                workLifeBalance: company.workLifeBalance?.score,
+                companySize: company.size,
+                industry: company.industry
+            },
+            generatedAt: new Date().toISOString()
+        };
+
+    } catch (error) {
+        logger.error('OpenAI email generation failed:', error);
+        logger.error('Error details:', {
+            message: error.message,
+            status: error.status,
+            type: error.type
+        });
+
+        // Return enhanced template as fallback
+        return generateEnhancedTemplateEmail(profile, company, hrContact);
+    }
+}
+
+// Enhanced template generator as fallback
+function generateEnhancedTemplateEmail(profile, company, hrContact) {
+    const recipientName = hrContact?.name || 'Hiring Manager';
+    const recipientEmail = hrContact?.email || `hr@${company.domain}`;
+    const senderName = `${profile.personalInfo?.firstName} ${profile.personalInfo?.lastName}`;
+
+    // Create personalized elements based on company data
+    const industryIntro = getIndustrySpecificIntro(company.industry);
+    const companySizeAppeal = getCompanySizeAppeal(company.size);
+    const locationNote = company.location?.includes(profile.personalInfo?.location?.city)
+        ? "As a local professional, I'm particularly excited about companies in our community."
+        : "";
+
+    const subject = `Informational Interview Request - ${senderName}, ${profile.currentTitle}`;
+
+    const content = `Dear ${recipientName},
+
+I hope this email finds you well. My name is ${senderName}, and I'm a ${profile.currentTitle} with a strong interest in ${company.name}'s work in the ${company.industry} space.
+
+${industryIntro} I've been particularly impressed by ${company.name}'s ${company.highlights?.[0] || 'innovative approach'} and ${company.highlights?.[1] || 'company culture'}. ${companySizeAppeal}
+
+With my background in ${profile.aiAnalysis?.strengths?.[0] || profile.skills?.technical?.[0] || 'technology'} and passion for ${profile.aiAnalysis?.interests?.[0] || 'continuous learning'}, I believe I could contribute meaningfully to your team. ${locationNote}
+
+I would greatly appreciate the opportunity to learn more about ${company.name}'s culture, current initiatives, and future direction. Would you be available for a brief 15-20 minute informational interview in the coming weeks?
+
+Thank you for considering my request. I look forward to the possibility of connecting with you.
+
+Best regards,
+${senderName}
+${profile.personalInfo?.email}
+${profile.personalInfo?.phone || ''}
+${profile.personalInfo?.linkedinUrl ? `LinkedIn: ${profile.personalInfo?.linkedinUrl}` : ''}`;
+
+    return {
+        recipientName,
+        recipientEmail,
+        subject,
+        content,
+        keyPoints: [
+            `Customized for ${company.name} in ${company.industry}`,
+            `${company.size} company culture appeal`,
+            `Highlights ${profile.currentTitle} experience`,
+            `Requests informational interview (not job)`,
+            `Professional closing with full contact details`
+        ],
+        senderInfo: {
+            name: senderName,
+            email: profile.personalInfo?.email,
+            phone: profile.personalInfo?.phone,
+            location: `${profile.personalInfo?.location?.city || ''}, ${profile.personalInfo?.location?.state || ''}`.trim(),
+            linkedin: profile.personalInfo?.linkedinUrl,
+            portfolio: profile.personalInfo?.portfolioUrl
+        }
+    };
+}
+
+// Helper function for industry-specific introductions
+function getIndustrySpecificIntro(industry) {
+    const intros = {
+        technology: "In researching innovative tech companies,",
+        fintech: "As someone passionate about the intersection of finance and technology,",
+        healthcare: "With my interest in healthcare innovation,",
+        ecommerce: "Having followed the evolution of digital commerce,",
+        biotech: "As an advocate for biotechnology advancements,",
+        education: "With my commitment to educational technology,",
+        media: "As someone engaged with digital media trends,",
+        'ai-ml': "Being deeply interested in AI and machine learning applications,",
+        gaming: "As an enthusiast of interactive entertainment technology,",
+        cybersecurity: "With the critical importance of digital security,"
+    };
+    return intros[industry] || "In my search for innovative companies,";
+}
+
+// Helper function for company size appeals
+function getCompanySizeAppeal(size) {
+    const appeals = {
+        startup: "The dynamic, fast-paced environment of a startup like yours aligns perfectly with my entrepreneurial mindset.",
+        small: "I'm drawn to smaller companies where individual contributions have significant impact.",
+        medium: "The balance of stability and growth opportunity in mid-sized companies is particularly appealing to me.",
+        large: "The resources and scale of established companies like yours offer exciting possibilities for innovation."
+    };
+    return appeals[size] || "Your company's unique position in the market is particularly intriguing.";
 }
 
 // Generate comprehensive mock companies for development and demo
@@ -499,5 +734,7 @@ module.exports = {
     analyzeUserProfile,
     findCompanyMatches,
     evaluateWorkLifeBalance,
-    evaluateCompanyMatch
+    evaluateCompanyMatch,
+    generateAIEmail,
+    generateEnhancedTemplateEmail
 };

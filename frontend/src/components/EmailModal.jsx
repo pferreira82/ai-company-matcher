@@ -1,14 +1,31 @@
-import React, { useState } from 'react';
-import { X, Copy, Send, Mail, User, MapPin, Phone, Linkedin, Globe } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Copy, Send, Mail, User, MapPin, Phone, Linkedin, Globe, Edit3, Check } from 'lucide-react';
 
 const EmailModal = ({ isOpen, onClose, company, emailTemplate }) => {
     const [copied, setCopied] = useState(false);
+    const [editMode, setEditMode] = useState(false);
+    const [editedContent, setEditedContent] = useState('');
+
+    useEffect(() => {
+        if (emailTemplate?.content || emailTemplate?.body) {
+            setEditedContent(emailTemplate.content || emailTemplate.body);
+        }
+    }, [emailTemplate]);
 
     if (!isOpen || !company || !emailTemplate) return null;
 
+    // Handle different data structures
+    const template = emailTemplate?.data || emailTemplate;
+
+    if (!template) {
+        console.error('No email template data:', emailTemplate);
+        return null;
+    }
+
     const handleCopy = async () => {
         try {
-            await navigator.clipboard.writeText(emailTemplate.content || emailTemplate.body);
+            const contentToCopy = editMode ? editedContent : (emailTemplate.content || emailTemplate.body);
+            await navigator.clipboard.writeText(contentToCopy);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         } catch (err) {
@@ -18,16 +35,31 @@ const EmailModal = ({ isOpen, onClose, company, emailTemplate }) => {
 
     const handleEmailClient = () => {
         const subject = encodeURIComponent(emailTemplate.subject);
-        const body = encodeURIComponent(emailTemplate.content || emailTemplate.body);
+        const body = encodeURIComponent(editMode ? editedContent : (emailTemplate.content || emailTemplate.body));
         const to = encodeURIComponent(emailTemplate.recipientEmail || '');
 
         window.open(`mailto:${to}?subject=${subject}&body=${body}`);
     };
 
+    console.log('EmailModal rendering with:', { company, template });
+
+    const handleEditToggle = () => {
+        if (editMode) {
+            // Exiting edit mode - could save changes here if needed
+        }
+        setEditMode(!editMode);
+    };
+
+    const handleCancelEdit = () => {
+        setEditedContent(emailTemplate.content || emailTemplate.body);
+        setEditMode(false);
+    };
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
-                <div className="flex justify-between items-center p-6 border-b">
+            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+                {/* Header - Fixed */}
+                <div className="flex justify-between items-center p-6 border-b flex-shrink-0">
                     <div className="flex items-center gap-3">
                         <Mail className="w-6 h-6 text-blue-600" />
                         <div>
@@ -43,7 +75,8 @@ const EmailModal = ({ isOpen, onClose, company, emailTemplate }) => {
                     </button>
                 </div>
 
-                <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                {/* Content - Scrollable */}
+                <div className="flex-1 p-6 overflow-y-auto">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Email Content */}
                         <div className="lg:col-span-2 space-y-4">
@@ -67,12 +100,51 @@ const EmailModal = ({ isOpen, onClose, company, emailTemplate }) => {
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Email Body:
-                                </label>
-                                <div className="bg-gray-50 p-4 rounded-lg text-sm whitespace-pre-line border min-h-[300px]">
-                                    {emailTemplate.content || emailTemplate.body}
+                                <div className="flex justify-between items-center mb-2">
+                                    <label className="block text-sm font-medium text-gray-700">
+                                        Email Body:
+                                    </label>
+                                    <div className="flex gap-2">
+                                        {editMode ? (
+                                            <>
+                                                <button
+                                                    onClick={handleEditToggle}
+                                                    className="text-green-600 hover:text-green-700 transition-colors flex items-center gap-1 text-sm"
+                                                >
+                                                    <Check className="w-4 h-4" />
+                                                    Save
+                                                </button>
+                                                <button
+                                                    onClick={handleCancelEdit}
+                                                    className="text-gray-500 hover:text-gray-700 transition-colors flex items-center gap-1 text-sm"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                    Cancel
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={handleEditToggle}
+                                                className="text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1 text-sm"
+                                            >
+                                                <Edit3 className="w-4 h-4" />
+                                                Edit
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
+                                {editMode ? (
+                                    <textarea
+                                        value={editedContent}
+                                        onChange={(e) => setEditedContent(e.target.value)}
+                                        className="w-full bg-white p-4 rounded-lg text-sm border border-blue-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 min-h-[300px] resize-vertical"
+                                        placeholder="Edit your email content..."
+                                    />
+                                ) : (
+                                    <div className="bg-gray-50 p-4 rounded-lg text-sm whitespace-pre-line border min-h-[300px]">
+                                        {emailTemplate.content || emailTemplate.body}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -185,20 +257,21 @@ const EmailModal = ({ isOpen, onClose, company, emailTemplate }) => {
                     </div>
                 </div>
 
-                <div className="flex gap-3 p-6 border-t bg-gray-50">
+                {/* Footer - Fixed */}
+                <div className="flex gap-3 p-6 border-t bg-gray-50 flex-shrink-0">
                     <button
                         onClick={handleCopy}
-                        className={`btn flex items-center gap-2 ${
-                            copied ? 'bg-green-600 text-white' : 'btn-primary'
+                        className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                            copied ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-blue-600 text-white hover:bg-blue-700'
                         }`}
                     >
                         <Copy className="w-4 h-4" />
-                        {copied ? 'Copied!' : 'Copy Email'}
+                        {copied ? 'Copied!' : `Copy ${editMode ? 'Edited ' : ''}Email`}
                     </button>
 
                     <button
                         onClick={handleEmailClient}
-                        className="btn btn-success flex items-center gap-2"
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
                     >
                         <Send className="w-4 h-4" />
                         Open in Email Client
@@ -206,7 +279,7 @@ const EmailModal = ({ isOpen, onClose, company, emailTemplate }) => {
 
                     <button
                         onClick={onClose}
-                        className="btn btn-secondary ml-auto"
+                        className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors ml-auto"
                     >
                         Close
                     </button>

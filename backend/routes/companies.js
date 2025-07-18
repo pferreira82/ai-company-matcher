@@ -3,6 +3,10 @@ const router = express.Router();
 const Company = require('../models/Company');
 const logger = require('../utils/logger');
 
+// ==========================================
+// SPECIFIC ROUTES FIRST (no parameters)
+// ==========================================
+
 // Get all companies/matches with better error handling
 router.get('/', async (req, res) => {
     try {
@@ -122,296 +126,6 @@ router.get('/', async (req, res) => {
             success: false,
             message: 'Failed to get companies',
             error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-        });
-    }
-});
-
-// Get company by ID
-router.get('/:id', async (req, res) => {
-    try {
-        const company = await Company.findById(req.params.id).lean();
-
-        if (!company) {
-            return res.status(404).json({
-                success: false,
-                message: 'Company not found'
-            });
-        }
-
-        // Add computed fields
-        const enrichedCompany = {
-            ...company,
-            id: company._id,
-            workLifeBalanceScore: company.workLifeBalance?.score || 0,
-            hrContact: company.hrContacts && company.hrContacts.length > 0 ? company.hrContacts[0] : null,
-            contactCount: company.hrContacts?.length || 0,
-            verifiedContactCount: company.hrContacts?.filter(c => c.verified).length || 0,
-            remotePolicy: company.remotePolicy || 'Not specified',
-            status: company.status || 'not-contacted',
-            emailCount: company.emailHistory?.length || 0,
-            hasEmailSent: company.emailHistory?.some(email => email.sent) || false
-        };
-
-        res.json({
-            success: true,
-            data: enrichedCompany
-        });
-
-    } catch (error) {
-        logger.error('Failed to get company:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get company'
-        });
-    }
-});
-
-// Update company status
-router.put('/:id/status', async (req, res) => {
-    try {
-        const { status } = req.body;
-
-        // Validate status
-        const validStatuses = ['not-contacted', 'contacted', 'responded', 'interview', 'rejected', 'hired'];
-        if (!validStatuses.includes(status)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid status'
-            });
-        }
-
-        const company = await Company.findByIdAndUpdate(
-            req.params.id,
-            {
-                status,
-                updatedAt: new Date()
-            },
-            { new: true }
-        );
-
-        if (!company) {
-            return res.status(404).json({
-                success: false,
-                message: 'Company not found'
-            });
-        }
-
-        logger.info('Company status updated:', {
-            companyId: req.params.id,
-            companyName: company.name,
-            newStatus: status
-        });
-
-        res.json({
-            success: true,
-            data: company
-        });
-
-    } catch (error) {
-        logger.error('Failed to update company status:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update company status'
-        });
-    }
-});
-
-// Bulk update companies
-router.put('/bulk', async (req, res) => {
-    try {
-        const { companyIds, updates } = req.body;
-
-        if (!companyIds || !Array.isArray(companyIds) || companyIds.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Company IDs array is required'
-            });
-        }
-
-        if (!updates || typeof updates !== 'object') {
-            return res.status(400).json({
-                success: false,
-                message: 'Updates object is required'
-            });
-        }
-
-        // Validate status if being updated
-        if (updates.status) {
-            const validStatuses = ['not-contacted', 'contacted', 'responded', 'interview', 'rejected', 'hired'];
-            if (!validStatuses.includes(updates.status)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Invalid status'
-                });
-            }
-        }
-
-        // Add timestamp to updates
-        updates.updatedAt = new Date();
-
-        const result = await Company.updateMany(
-            { _id: { $in: companyIds } },
-            { $set: updates }
-        );
-
-        logger.info('Bulk company update:', {
-            companyIds,
-            updates,
-            modifiedCount: result.modifiedCount
-        });
-
-        res.json({
-            success: true,
-            message: `Updated ${result.modifiedCount} companies`,
-            data: {
-                matchedCount: result.matchedCount,
-                modifiedCount: result.modifiedCount
-            }
-        });
-
-    } catch (error) {
-        logger.error('Failed bulk company update:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update companies'
-        });
-    }
-});
-
-// Add note to company
-router.post('/:id/notes', async (req, res) => {
-    try {
-        const { note } = req.body;
-
-        if (!note || note.trim().length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Note cannot be empty'
-            });
-        }
-
-        const company = await Company.findByIdAndUpdate(
-            req.params.id,
-            {
-                $push: {
-                    notes: {
-                        content: note.trim(),
-                        createdAt: new Date()
-                    }
-                },
-                updatedAt: new Date()
-            },
-            { new: true }
-        );
-
-        if (!company) {
-            return res.status(404).json({
-                success: false,
-                message: 'Company not found'
-            });
-        }
-
-        logger.info('Note added to company:', {
-            companyId: req.params.id,
-            companyName: company.name,
-            noteLength: note.length
-        });
-
-        res.json({
-            success: true,
-            data: company
-        });
-
-    } catch (error) {
-        logger.error('Failed to add note to company:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to add note to company'
-        });
-    }
-});
-
-// ENHANCED: Delete company by ID (with improved logging and response)
-router.delete('/:id', async (req, res) => {
-    try {
-        const company = await Company.findByIdAndDelete(req.params.id);
-
-        if (!company) {
-            return res.status(404).json({
-                success: false,
-                message: 'Company not found'
-            });
-        }
-
-        logger.info('Company deleted:', {
-            companyId: req.params.id,
-            companyName: company.name,
-            deletedAt: new Date()
-        });
-
-        res.json({
-            success: true,
-            message: 'Company deleted successfully',
-            data: {
-                deletedCompany: {
-                    id: company._id,
-                    name: company.name
-                }
-            }
-        });
-
-    } catch (error) {
-        logger.error('Failed to delete company:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to delete company'
-        });
-    }
-});
-
-// NEW: Bulk delete companies
-router.delete('/bulk', async (req, res) => {
-    try {
-        const { companyIds } = req.body;
-
-        if (!companyIds || !Array.isArray(companyIds) || companyIds.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Company IDs array is required'
-            });
-        }
-
-        // Get company names for logging before deletion
-        const companiesToDelete = await Company.find(
-            { _id: { $in: companyIds } },
-            { name: 1 }
-        ).lean();
-
-        const result = await Company.deleteMany({
-            _id: { $in: companyIds }
-        });
-
-        logger.info('Bulk company deletion:', {
-            companyIds,
-            deletedCount: result.deletedCount,
-            companiesDeleted: companiesToDelete.map(c => c.name),
-            deletedAt: new Date()
-        });
-
-        res.json({
-            success: true,
-            message: `Deleted ${result.deletedCount} companies`,
-            data: {
-                deletedCount: result.deletedCount,
-                companiesDeleted: companiesToDelete
-            }
-        });
-
-    } catch (error) {
-        logger.error('Failed bulk company deletion:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to delete companies'
         });
     }
 });
@@ -869,6 +583,302 @@ router.get('/minimal', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to get companies'
+        });
+    }
+});
+
+// ==========================================
+// PARAMETERIZED ROUTES (with :id params)
+// ==========================================
+
+// Add note to company
+router.post('/:id/notes', async (req, res) => {
+    try {
+        const { note } = req.body;
+
+        if (!note || note.trim().length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Note cannot be empty'
+            });
+        }
+
+        const company = await Company.findByIdAndUpdate(
+            req.params.id,
+            {
+                $push: {
+                    notes: {
+                        content: note.trim(),
+                        createdAt: new Date()
+                    }
+                },
+                updatedAt: new Date()
+            },
+            { new: true }
+        );
+
+        if (!company) {
+            return res.status(404).json({
+                success: false,
+                message: 'Company not found'
+            });
+        }
+
+        logger.info('Note added to company:', {
+            companyId: req.params.id,
+            companyName: company.name,
+            noteLength: note.length
+        });
+
+        res.json({
+            success: true,
+            data: company
+        });
+
+    } catch (error) {
+        logger.error('Failed to add note to company:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to add note to company'
+        });
+    }
+});
+
+// Move this BEFORE the /:id route (around line 400)
+// NEW: Bulk delete companies - MOVED BEFORE /:id
+router.delete('/bulk', async (req, res) => {
+    try {
+        const { companyIds } = req.body;
+
+        if (!companyIds || !Array.isArray(companyIds) || companyIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Company IDs array is required'
+            });
+        }
+
+        // Get company names for logging before deletion
+        const companiesToDelete = await Company.find(
+            { _id: { $in: companyIds } },
+            { name: 1 }
+        ).lean();
+
+        const result = await Company.deleteMany({
+            _id: { $in: companyIds }
+        });
+
+        logger.info('Bulk company deletion:', {
+            companyIds,
+            deletedCount: result.deletedCount,
+            companiesDeleted: companiesToDelete.map(c => c.name),
+            deletedAt: new Date()
+        });
+
+        res.json({
+            success: true,
+            message: `Deleted ${result.deletedCount} companies`,
+            data: {
+                deletedCount: result.deletedCount,
+                companiesDeleted: companiesToDelete
+            }
+        });
+
+    } catch (error) {
+        logger.error('Failed bulk company deletion:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete companies'
+        });
+    }
+});
+
+// THEN the /:id route
+router.delete('/:id', async (req, res) => {
+    // existing single delete logic
+    try {
+        const company = await Company.findByIdAndDelete(req.params.id);
+
+        if (!company) {
+            return res.status(404).json({
+                success: false,
+                message: 'Company not found'
+            });
+        }
+
+        logger.info('Company deleted:', {
+            companyId: req.params.id,
+            companyName: company.name,
+            deletedAt: new Date()
+        });
+
+        res.json({
+            success: true,
+            message: 'Company deleted successfully',
+            data: {
+                deletedCompany: {
+                    id: company._id,
+                    name: company.name
+                }
+            }
+        });
+
+    } catch (error) {
+        logger.error('Failed to delete company:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete company'
+        });
+    }
+});
+
+// Get company by ID
+router.get('/:id', async (req, res) => {
+    try {
+        const company = await Company.findById(req.params.id).lean();
+
+        if (!company) {
+            return res.status(404).json({
+                success: false,
+                message: 'Company not found'
+            });
+        }
+
+        // Add computed fields
+        const enrichedCompany = {
+            ...company,
+            id: company._id,
+            workLifeBalanceScore: company.workLifeBalance?.score || 0,
+            hrContact: company.hrContacts && company.hrContacts.length > 0 ? company.hrContacts[0] : null,
+            contactCount: company.hrContacts?.length || 0,
+            verifiedContactCount: company.hrContacts?.filter(c => c.verified).length || 0,
+            remotePolicy: company.remotePolicy || 'Not specified',
+            status: company.status || 'not-contacted',
+            emailCount: company.emailHistory?.length || 0,
+            hasEmailSent: company.emailHistory?.some(email => email.sent) || false
+        };
+
+        res.json({
+            success: true,
+            data: enrichedCompany
+        });
+
+    } catch (error) {
+        logger.error('Failed to get company:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get company'
+        });
+    }
+});
+
+// Update company status
+router.put('/:id/status', async (req, res) => {
+    try {
+        const { status } = req.body;
+
+        // Validate status
+        const validStatuses = ['not-contacted', 'contacted', 'responded', 'interview', 'rejected', 'hired'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid status'
+            });
+        }
+
+        const company = await Company.findByIdAndUpdate(
+            req.params.id,
+            {
+                status,
+                updatedAt: new Date()
+            },
+            { new: true }
+        );
+
+        if (!company) {
+            return res.status(404).json({
+                success: false,
+                message: 'Company not found'
+            });
+        }
+
+        logger.info('Company status updated:', {
+            companyId: req.params.id,
+            companyName: company.name,
+            newStatus: status
+        });
+
+        res.json({
+            success: true,
+            data: company
+        });
+
+    } catch (error) {
+        logger.error('Failed to update company status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update company status'
+        });
+    }
+});
+
+// Bulk update companies
+router.put('/bulk', async (req, res) => {
+    try {
+        const { companyIds, updates } = req.body;
+
+        if (!companyIds || !Array.isArray(companyIds) || companyIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Company IDs array is required'
+            });
+        }
+
+        if (!updates || typeof updates !== 'object') {
+            return res.status(400).json({
+                success: false,
+                message: 'Updates object is required'
+            });
+        }
+
+        // Validate status if being updated
+        if (updates.status) {
+            const validStatuses = ['not-contacted', 'contacted', 'responded', 'interview', 'rejected', 'hired'];
+            if (!validStatuses.includes(updates.status)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid status'
+                });
+            }
+        }
+
+        // Add timestamp to updates
+        updates.updatedAt = new Date();
+
+        const result = await Company.updateMany(
+            { _id: { $in: companyIds } },
+            { $set: updates }
+        );
+
+        logger.info('Bulk company update:', {
+            companyIds,
+            updates,
+            modifiedCount: result.modifiedCount
+        });
+
+        res.json({
+            success: true,
+            message: `Updated ${result.modifiedCount} companies`,
+            data: {
+                matchedCount: result.matchedCount,
+                modifiedCount: result.modifiedCount
+            }
+        });
+
+    } catch (error) {
+        logger.error('Failed bulk company update:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update companies'
         });
     }
 });

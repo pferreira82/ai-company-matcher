@@ -158,7 +158,7 @@ const searchApollo = async (params) => {
 
     } catch (error) {
         logger.error('Apollo.io search failed:', error);
-        return generateMockApolloData(params);
+        return [];
     }
 };
 
@@ -208,7 +208,7 @@ const searchHunter = async (params) => {
 
     } catch (error) {
         logger.error('Hunter.io search failed:', error);
-        return generateMockHunterData(params);
+        return [];
     }
 };
 
